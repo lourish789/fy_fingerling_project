@@ -1,0 +1,22 @@
+# Virtual Environment
+.venv/
+env/
+venv/
+
+# Python Cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Local outputs, logs and data
+output/
+logs/
+data/
+notebooks/
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Datasets
+*.zip

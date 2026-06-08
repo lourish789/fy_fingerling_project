@@ -1,0 +1,95 @@
+# Catfish Fingerling Counter Configuration
+
+# Model Settings
+model:
+  name: "fingerling_detector"
+  engine: "ultralytics"
+  weights: "best.pt"  # Path to trained weights
+  pretrained: "yolov26n.pt"  # Preferred base checkpoint (falls back to yolov8n.pt if unavailable)
+  confidence_threshold: 0.2
+  iou_threshold: 0.45
+  device: "auto"  # "auto", "cuda", "cpu"
+  dark_surface_filter:
+    enabled: false
+    min_value_mean: 45
+    max_value_std: 28
+    max_saturation_mean: 65
+
+# Class Labels
+classes:
+  - fingerling
+  - post_fingerling
+  - juvenile
+
+# Optional class colors for overlays (BGR)
+class_colors:
+  fingerling: [0, 255, 0]
+  post_fingerling: [255, 191, 0]
+  juvenile: [0, 165, 255]
+  unknown: [128, 128, 128]
+
+# Calibration (for real-world size estimation)
+calibration:
+  pixels_per_mm: 5.0  # Adjust based on your camera setup
+  reference_distance_cm: 30  # Camera distance from water surface
+
+# Video Processing
+video:
+  input_source: 0  # 0 for webcam, or path to video file
+  frame_width: null  # Preserve source width unless explicitly overridden
+  frame_height: null  # Preserve source height unless explicitly overridden
+  fps: 30
+  buffer_size: 10
+
+# Tracking Settings
+tracking:
+  max_age: 30  # Maximum frames to keep track without detection
+  min_hits: 2  # Minimum hits before track is confirmed for active display/tracking
+  iou_threshold: 0.3
+  max_distance: 160  # Maximum pixel distance for association
+
+# Counting Settings
+counting:
+  mode: "unique_track"  # "unique_track" counts each tracked object once, "line_crossing" counts only crossings
+  count_min_hits: 2  # Number of detections before a track is added to cumulative total
+  # Line-based counting (for conveyor/channel setups)
+  use_counting_line: true
+  counting_line_position: 0.5  # Relative position (0-1) across frame
+  counting_line_orientation: "horizontal"  # "horizontal" or "vertical"
+  
+  # Region-based counting
+  use_counting_region: false
+  counting_region: [100, 100, 500, 400]  # [x1, y1, x2, y2]
+
+# Streaming Output
+streaming:
+  enabled: true
+  host: "0.0.0.0"
+  port: 5000
+  update_interval_ms: 100  # How often to push updates
+  
+# Display Settings
+display:
+  show_video: true
+  show_bounding_boxes: true
+  show_tracks: true
+  show_counting_line: true
+  show_size_labels: true
+  show_statistics: true
+  font_scale: 0.6
+  line_thickness: 2
+
+# Logging
+logging:
+  level: "INFO"
+  save_logs: true
+  log_dir: "logs"
+  save_detections: true
+  save_interval_seconds: 60
+
+# Output
+output:
+  save_video: false
+  output_path: "output"
+  save_csv: true
+  csv_path: "output/counts.csv"
