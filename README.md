@@ -1,357 +1,371 @@
-# Catfish Fingerling Counter 🐟
+# AquaCount — Catfish Fingerling Intelligence System
 
-An AI-powered system for counting and sorting catfish fingerlings by class from video, live camera, images, or web URLs. The model uses YOLO for detection, custom tracking algorithms for counting, and provides real-time streaming output.
+> Real-time AI-powered detection, tracking, and classification of catfish
+> fingerlings by developmental stage — Fingerling · Post-Fingerling · Juvenile.
 
-Architecture blueprint: `docs/ARCHITECTURE.md`
+---
 
-## Features
+## Table of Contents
 
-- **Multi-Source Input**: 
-  - Live camera/webcam feed
-  - Video files (MP4, AVI, etc.)
-  - RTSP/IP camera streams
-  - YouTube and web video URLs
-  - Image files (JPG, PNG, etc.)
-  - Image directories (batch processing)
-- **Real-time Detection**: YOLOv8-based fingerling detection
-- **Class-Based Sorting**: Automatic sorting into Fingerling, Post-Fingerling, and Juvenile classes
-- **Object Tracking**: SORT-based tracking for accurate counting
-- **Counting Line**: Virtual counting line for precise enumeration
-- **Web Dashboard**: Interactive web interface with:
-  - Live video streaming
-  - File upload support
-  - URL/YouTube video processing
-  - Camera controls
-  - Real-time count display
-- **Console Output**: Live terminal updates
-- **CSV Logging**: Export count data over time
-- **Video Output**: Save annotated video with counts
+1. [System Architecture](#1-system-architecture)
+2. [Repository Structure](#2-repository-structure)
+3. [Local Setup](#3-local-setup)
+4. [Model Conversion (PyTorch → ONNX)](#4-model-conversion-pytorch--onnx)
+5. [Deploying the Backend (Render)](#5-deploying-the-backend-render)
+6. [Deploying the Frontend (Vercel)](#6-deploying-the-frontend-vercel)
+7. [Environment Variables](#7-environment-variables)
+8. [API Reference](#8-api-reference)
+9. [Free-Tier Optimisation Notes](#9-free-tier-optimisation-notes)
+10. [Git Setup for dev Branch](#10-git-setup-for-dev-branch)
 
-## Class Categories
+---
 
-| Category | Description |
-|----------|-------------|
-| Fingerling | Early growth stage |
-| Post-Fingerling | Intermediate stage |
-| Juvenile | Advanced pre-adult stage |
+## 1. System Architecture
 
-## Installation
-
-### Prerequisites
-
-- Python 3.9 or higher
-- CUDA-capable GPU (recommended for real-time processing)
-- Webcam or video file for input
-
-### Setup
-
-1. **Clone/Download the project**
-
-2. **Create virtual environment** (recommended):
-   ```bash
-   python -m venv venv
-   
-   # Windows
-   venv\Scripts\activate
-   
-   # Linux/Mac
-   source venv/bin/activate
-   ```
-
-3. **Install dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-4. **Verify installation**:
-   ```bash
-   python -c "import torch; print(f'PyTorch: {torch.__version__}')"
-  python -c "from ultralytics import YOLO; print('Ultralytics YOLO: OK')"
-   ```
-
-## Architecture-First Workflow
-
-Before environment setup, review architecture and interfaces first:
-
-1. Read `docs/ARCHITECTURE.md`
-2. Confirm class labels and counting contracts
-3. Select model checkpoint strategy (`yolov26n.pt` preferred, fallback to `yolov8n.pt`)
-4. Configure Python environment and install dependencies
-
-## Quick Start
-
-### Video/Camera Processing
-
-```bash
-# Use webcam (default)
-python main.py
-
-# Use specific camera
-python main.py --source 1
-
-# Use video file
-python main.py --source path/to/video.mp4
-
-# Use IP camera/RTSP stream
-python main.py --source "rtsp://username:password@ip:port/stream"
-
-# Use YouTube video
-python main.py --source "https://www.youtube.com/watch?v=VIDEO_ID"
-
-# Save output video
-python main.py --source video.mp4 --output output.mp4
-
-# Prefer YOLOv26 checkpoint when available (falls back to YOLOv8n)
-python main.py --source video.mp4 --pretrained-model yolov26n.pt
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│                         BROWSER / CLIENT                             │
+│   frontend/index.html  (served by Vercel CDN — free tier)           │
+│   ┌──────────────────┐   ┌────────────────────────────────────────┐  │
+│   │  Video Feed      │   │  Stats Dashboard  (Chart.js counters)  │  │
+│   │  + Digital Zoom  │   │  Batch Results   Live Indicator        │  │
+│   └────────┬─────────┘   └────────────────────────────────────────┘  │
+│            │  MJPEG stream               ↑ Socket.IO (WS/polling)   │
+└────────────┼──────────────────────────────────────────────────────────┘
+             │                             │
+             ▼                             │
+┌──────────────────────────────────────────────────────────────────────┐
+│                    BACKEND  (Render Free Tier)                       │
+│   Gunicorn + Eventlet  →  Flask + Flask-SocketIO                    │
+│                                                                      │
+│  ┌────────────────┐   ┌─────────────────┐   ┌──────────────────┐    │
+│  │  REST API      │   │  VideoProcessor │   │  FingerlingTrack │    │
+│  │  /api/upload   │──▶│  (cv2, ffmpeg)  │──▶│  (SORT + Hungar.)│    │
+│  │  /api/batch    │   └────────┬────────┘   └────────┬─────────┘    │
+│  │  /api/url      │            │                     │              │
+│  └────────────────┘            ▼                     ▼              │
+│                     ┌────────────────────┐  ┌────────────────────┐  │
+│                     │  OnnxDetector      │  │  StreamingServer   │  │
+│                     │  onnxruntime (CPU) │  │  /video_feed MJPEG │  │
+│                     │  best.onnx  ~6 MB  │  │  socket.emit update│  │
+│                     └────────────────────┘  └────────────────────┘  │
+└──────────────────────────────────────────────────────────────────────┘
+             │
+             ▼
+     models/best.onnx   ←  converted locally from models/best.pt
 ```
 
-### Image Processing
+**Key design decisions:**
 
-```bash
-# Process single image
-python main.py --image fingerlings.jpg
+| Choice | Reason |
+|---|---|
+| ONNX Runtime instead of PyTorch | PyTorch ≈ 1.8 GB; ONNX Runtime ≈ 150 MB — fits Render's 512 MB RAM |
+| Eventlet worker in Gunicorn | Flask-SocketIO requires async worker for concurrent WebSocket + HTTP |
+| Vercel for static frontend | Single HTML file — zero build step, instant global CDN delivery |
+| Socket.IO polling transport | Works through Render's reverse proxy without WebSocket upgrade issues |
+| Thin bounding boxes (1 px) | Discrete overlays that don't obscure the fish being examined |
+| Stats overlay = counts only | Frame number, FPS, and telemetry removed from video; shown in dashboard |
 
-# Process image from URL
-python main.py --image "https://example.com/image.jpg"
+---
 
-# Process all images in a directory
-python main.py --image-dir ./images
-
-# Save annotated result
-python main.py --image fingerlings.jpg --output result.jpg
-```
-
-### Web Server Mode
-
-Run as a web server for uploading files and processing URLs:
-
-```bash
-python main.py --web-server
-```
-
-Then open your browser to `http://localhost:5000`
-
-The web interface allows you to:
-- Start/stop live camera feed
-- Upload video or image files
-- Enter YouTube or video URLs for processing
-- View real-time counts and statistics
-
-### Web Dashboard
-
-When running, open your browser to:
-```
-http://localhost:5000
-```
-
-The dashboard shows:
-- Live video feed with annotations
-- Real-time counts by class
-- Class distribution chart
-- Upload and URL input controls
-- Camera start/stop buttons
-- FPS and frame information
-
-### Keyboard Controls
-
-While the display window is active:
-- `q` - Quit the application
-- `r` - Reset counts
-- `s` - Save screenshot
-
-## Configuration
-
-Edit `config/config.yaml` to customize:
-
-```yaml
-# Model settings
-model:
-  confidence_threshold: 0.5  # Detection confidence
-  device: "auto"  # "auto", "cuda", "cpu"
-
-# Model classes
-classes:
-  - fingerling
-  - post_fingerling
-  - juvenile
-
-# Counting line position
-counting:
-  counting_line_position: 0.5  # Middle of frame
-  counting_line_orientation: "horizontal"
-
-# Streaming server
-streaming:
-  port: 5000
-```
-
-## Training Custom Model
-
-For best results, train on your own fingerling dataset:
-
-### 1. Prepare Dataset
-
-```bash
-# Extract frames from video
-python -m src.training.data_prep extract \
-    --video fingerlings.mp4 \
-    --output data/raw_frames \
-    --interval 30
-
-# Split into train/val/test
-python -m src.training.data_prep split \
-    --dir data/labeled_images \
-    --output data/dataset
-```
-
-### 2. Label Images
-
-Use a labeling tool like [LabelImg](https://github.com/heartexlabs/labelImg) or [CVAT](https://cvat.ai/):
-
-1. Open images from `data/raw_frames`
-2. Draw bounding boxes around each fingerling
-3. Save annotations in YOLO format
-4. Save label files to `data/dataset/labels/train`
-
-### 3. Create Dataset Configuration
-
-Create `data/fingerlings.yaml`:
-```yaml
-path: ./data/dataset
-train: images/train
-val: images/val
-
-names:
-  0: fingerling
-  1: post_fingerling
-  2: juvenile
-```
-
-### 4. Train Model
-
-```bash
-python -m src.training.train \
-    --data data/fingerlings.yaml \
-  --model yolov26n.pt \
-  --model-engine ultralytics \
-    --epochs 100 \
-    --batch 16 \
-    --imgsz 640
-
-# Or build YOLO labels directly from a Roboflow COCO zip, then train
-python -m src.training.train \
-  --prepare-zip fish-fingerling.v1i.coco.zip \
-  --prepared-output data/fish_fingerling_yolo \
-  --prepared-yaml data/fish_fingerling.yaml \
-  --model yolov26n.pt \
-  --model-engine ultralytics \
-  --epochs 100 \
-  --batch 16 \
-  --imgsz 640
-```
-
-### 5. Use Trained Model
-
-```bash
-python main.py \
-    --source video.mp4 \
-    --weights runs/fingerling_detector/weights/best.pt
-```
-
-## Project Structure
+## 2. Repository Structure
 
 ```
 fingerling_counting_model/
-├── main.py                 # Main entry point
-├── requirements.txt        # Python dependencies
-├── config/
-│   └── config.yaml        # Configuration file
+├── frontend/
+│   └── index.html              ← Modernised engineering dashboard (Vercel)
 ├── src/
+│   ├── app/
+│   │   └── counter.py          ← FingerlingCounter — main application class
 │   ├── models/
-│   │   ├── detector.py    # YOLOv8 detection model
-│   │   ├── size_classifier.py  # Size classification
-│   │   └── tracker.py     # Object tracking
-│   ├── video/
-│   │   ├── processor.py   # Video input handling
-│   │   └── visualization.py  # Drawing utilities
+│   │   ├── detector.py         ← PyTorch/Ultralytics detector (local dev)
+│   │   ├── onnx_detector.py    ← ONNX detector (production)
+│   │   ├── tracker.py          ← SORT tracker (Hungarian algorithm)
+│   │   └── size_classifier.py
 │   ├── streaming/
-│   │   └── server.py      # Web streaming server
-│   ├── training/
-│   │   ├── train.py       # Model training
-│   │   └── data_prep.py   # Dataset preparation
-│   └── app/
-│       └── counter.py     # Main application
-├── models/                 # Trained model weights
-├── data/                   # Training data
-├── output/                 # Output files
-└── logs/                   # Log files
+│   │   ├── server.py           ← Flask + SocketIO streaming server
+│   │   └── wsgi.py             ← Gunicorn WSGI entry point (Render)
+│   └── video/
+│       ├── processor.py        ← Video / image I/O + URL / YouTube support
+│       └── visualization.py    ← Clean annotation overlay (thin boxes, counts only)
+├── scripts/
+│   └── convert_to_onnx.py      ← Local PyTorch → ONNX conversion utility
+├── models/
+│   ├── best.pt                 ← (not committed — too large for git)
+│   └── best.onnx               ← Committed production artefact (~6–15 MB)
+├── config/
+│   └── config.yaml
+├── main.py                     ← CLI entry point
+├── requirements.txt            ← Full development dependencies
+├── requirements-prod.txt       ← Minimal production dependencies (no PyTorch)
+├── Procfile                    ← Render start command
+├── render.yaml                 ← Render service definition
+├── vercel.json                 ← Vercel routing config
+└── .gitignore                  ← Excludes .venv, data, runs, videos, notebooks
 ```
 
-## API Usage
+---
 
-```python
-from src.app.counter import FingerlingCounter
+## 3. Local Setup
 
-# Create counter
-counter = FingerlingCounter(
-    video_source="video.mp4",
-    weights_path="models/best.pt",
-    use_streaming=True,
-    use_display=True
-)
+### Prerequisites
+- Python 3.10 or 3.11
+- Git
 
-# Run counting
-final_counts = counter.run()
+### Steps
 
-print(f"Total: {final_counts['total']}")
-print(f"Fingerling: {final_counts['fingerling']}")
-print(f"Post-Fingerling: {final_counts['post_fingerling']}")
-print(f"Juvenile: {final_counts['juvenile']}")
-print(f"Unknown: {final_counts.get('unknown', 0)}")
+```bash
+# 1. Clone the repository
+git clone https://github.com/lourish789/fy_fingerling_project.git
+cd fy_fingerling_project
+
+# 2. Create and activate a virtual environment
+python -m venv .venv
+# Windows:
+.venv\Scripts\activate
+# macOS / Linux:
+source .venv/bin/activate
+
+# 3. Install full development dependencies
+pip install -r requirements.txt
+
+# 4. Place your trained model weights
+cp /path/to/your/best.pt models/best.pt
+
+# 5. (Optional) Convert to ONNX for local testing of the production path
+python scripts/convert_to_onnx.py --weights models/best.pt
+
+# 6. Run the web server locally
+python main.py --web-server --port 5000
+
+# 7. Serve the frontend
+python -m http.server 8080 --directory frontend
+# Then open:  http://localhost:8080
+# The frontend auto-detects localhost and connects to http://localhost:5000
 ```
 
-## Calibration
+### CLI Quick Reference
 
-For accurate size estimation, calibrate the system:
+```
+python main.py --source 0              # live webcam
+python main.py --source video.mp4      # video file
+python main.py --image photo.jpg       # single image
+python main.py --image-dir ./images    # batch directory
+python main.py --web-server            # upload/URL dashboard
+python main.py --weights models/best.onnx  # use ONNX model
+python main.py --no-display            # headless (server) mode
+python main.py --port 5000             # custom port
+```
 
-1. Place a ruler or known-size object in the camera view
-2. Measure its pixel length in the video
-3. Update `config.yaml`:
-   ```yaml
-   calibration:
-     pixels_per_mm: 5.0  # Adjust based on measurement
-   ```
+---
 
-## Performance Tips
+## 4. Model Conversion (PyTorch → ONNX)
 
-1. **GPU Acceleration**: Ensure CUDA is properly installed for faster processing
-2. **Resolution**: Lower resolution = faster processing
-3. **Frame Skip**: Process every Nth frame for faster counting
-4. **Batch Processing**: For offline video, use batch detection
+Run this **once, locally**, before your first deployment.
+Requires PyTorch + Ultralytics (already in `requirements.txt`).
 
-## Troubleshooting
+```bash
+# Install optional simplification tool
+pip install onnxsim
 
-### "CUDA out of memory"
-- Reduce batch size
-- Use smaller model (yolov8n.pt instead of larger checkpoints)
-- Reduce input resolution
+# Convert (default: models/best.pt → models/best.onnx at imgsz=640)
+python scripts/convert_to_onnx.py
 
-### "No detections"
-- Lower confidence threshold in config
-- Ensure proper lighting
-- Train custom model on your data
+# With explicit options
+python scripts/convert_to_onnx.py \
+  --weights models/best.pt \
+  --output  models/best.onnx \
+  --imgsz   640 \
+  --opset   12
+```
 
-### "Counts are inaccurate"
-- Adjust tracking parameters
-- Calibrate counting line position
-- Ensure fingerlings cross the counting line
+The script:
+1. Loads `best.pt` with Ultralytics YOLO
+2. Exports to ONNX with static input shape
+3. Optionally runs `onnxsim` to reduce graph complexity
+4. Prints the final file size (typically 5–15 MB for YOLOv8n/v9n)
 
-## License
+**Commit `models/best.onnx`** so Render can access it at container startup.
 
-MIT License - See LICENSE file
+---
 
-## Acknowledgments
+## 5. Deploying the Backend (Render)
 
-- [Ultralytics YOLOv8](https://github.com/ultralytics/ultralytics)
-- [OpenCV](https://opencv.org/)
-- [Flask](https://flask.palletsprojects.com/)
+### Option A — render.yaml (recommended)
+
+`render.yaml` at the repository root auto-configures the service.
+
+1. Push your `dev` branch to GitHub.
+2. In the [Render Dashboard](https://dashboard.render.com):
+   - **New** → **Web Service** → Connect GitHub repo → select **`dev`** branch.
+   - Render detects `render.yaml` and pre-fills all settings.
+3. Click **Create Web Service**.
+
+### Option B — Manual configuration
+
+| Setting | Value |
+|---|---|
+| Runtime | Python 3 |
+| Build Command | `pip install -r requirements-prod.txt` |
+| Start Command | `gunicorn --worker-class eventlet --workers 1 --bind 0.0.0.0:$PORT --timeout 120 "src.streaming.wsgi:app"` |
+| Health Check Path | `/api/status` |
+| Plan | Free |
+
+### Environment Variables (set in Render dashboard)
+
+| Variable | Value |
+|---|---|
+| `MODEL_PATH` | `models/best.onnx` |
+| `CONFIDENCE_THRESHOLD` | `0.25` |
+
+*(Render sets `PORT` automatically — do not add it manually.)*
+
+### Cold-Start Mitigation
+
+Render free tier shuts down idle services after ~15 min.
+Use [UptimeRobot](https://uptimerobot.com) (free) to ping
+`https://<service>.onrender.com/api/status` every 14 minutes.
+
+---
+
+## 6. Deploying the Frontend (Vercel)
+
+The frontend is a single static file — no build required.
+
+### Steps
+
+1. [Create a Vercel account](https://vercel.com) and connect your GitHub repo.
+2. **New Project** → import the repository.
+3. Set these in **Project Settings → General**:
+
+   | Setting | Value |
+   |---|---|
+   | Framework Preset | Other |
+   | Root Directory | *(leave blank)* |
+   | Output Directory | `frontend` |
+   | Build Command | *(leave blank)* |
+   | Install Command | *(leave blank)* |
+
+4. Set deployment branch to **`dev`** in **Project Settings → Git**.
+5. Click **Deploy**.
+
+### Point the Frontend at Your Backend
+
+After both services are live, open the frontend with the `?backend=` parameter:
+
+```
+https://your-vercel-app.vercel.app/?backend=https://aquacount-backend.onrender.com
+```
+
+Or permanently hard-code your Render URL in `frontend/index.html`
+(search for `your-render-backend.onrender.com` and replace it).
+
+---
+
+## 7. Environment Variables
+
+| Variable | Service | Purpose |
+|---|---|---|
+| `MODEL_PATH` | Render | Path to ONNX file relative to repo root |
+| `CONFIDENCE_THRESHOLD` | Render | Detection threshold (0.0–1.0) |
+| `PORT` | Render | Auto-set by Render |
+
+---
+
+## 8. API Reference
+
+Base URL: `https://<render-service>.onrender.com`
+
+### REST Endpoints
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/status` | Health check; returns tracking state |
+| `GET` | `/api/counts` | Current total counts by class |
+| `GET` | `/video_feed` | MJPEG video stream |
+| `POST` | `/api/upload` | Single video or image upload (`multipart/form-data`, field `file`) |
+| `POST` | `/api/upload_batch` | Multiple images (`multipart/form-data`, field `files[]`) |
+| `POST` | `/api/process_url` | Process from URL `{"url": "https://..."}` |
+| `POST` | `/api/start_camera` | Start webcam `{"camera_index": 0}` |
+| `POST` | `/api/stop` | Stop active processing |
+| `POST` | `/api/reset_counts` | Reset all counts to zero |
+
+### Socket.IO Events (Server → Client)
+
+| Event | Payload |
+|---|---|
+| `update` | `{counts, active_tracks, fps, frame_number, source_type, is_live}` |
+| `processing_started` | `{source, type}` |
+| `processing_completed` | `{}` |
+| `processing_error` | `{error}` |
+| `counts_reset` | `{}` |
+| `batch_results` | `{results[], batch_totals, total_files}` |
+| `batch_csv_saved` | `{csv_path}` |
+
+---
+
+## 9. Free-Tier Optimisation Notes
+
+### Render (backend)
+
+| Concern | Mitigation |
+|---|---|
+| RAM limit 512 MB | ONNX Runtime replaces PyTorch (saves ~1.5 GB) |
+| Shared CPU | Single Gunicorn worker; no GPU code paths |
+| 30-second idle timeout | `--timeout 120` in Gunicorn; Socket.IO uses long polling |
+| Cold starts | UptimeRobot ping every 14 min keeps service warm |
+| Large file uploads | Flask `MAX_CONTENT_LENGTH` capped at 500 MB |
+| MJPEG bandwidth | JPEG quality set to 80 in `_generate_frames()` |
+
+### Vercel (frontend)
+
+| Concern | Mitigation |
+|---|---|
+| Build cost | Zero — single static HTML, no npm, no bundler |
+| CDN latency | Vercel edge delivers the file from the nearest PoP |
+| JS dependency size | Chart.js and Socket.io loaded from CDN (cached by browser) |
+
+---
+
+## 10. Git Setup for dev Branch
+
+```bash
+# One-time identity config
+git config user.name  "lourish789"
+git config user.email "flourisholaiya@gmail.com"
+
+# Add remote (if not set)
+git remote add origin https://github.com/lourish789/fy_fingerling_project.git
+
+# Create and switch to dev branch
+git checkout -b dev
+
+# Stage all production-ready files
+git add \
+  frontend/index.html \
+  src/ \
+  scripts/ \
+  models/best.onnx \
+  config/ \
+  main.py \
+  requirements.txt \
+  requirements-prod.txt \
+  Procfile \
+  render.yaml \
+  vercel.json \
+  .gitignore \
+  README.md
+
+# Commit
+git commit -m "feat: production refactor — ONNX backend, modernised dashboard, digital zoom"
+
+# Push and set dev as the upstream tracking branch
+git push -u origin dev
+```
+
+Set **`dev`** as the deployment branch in both Vercel and Render dashboards.
+
+---
+
+*AquaCount v1.0 — Aquaculture Intelligence for Sustainable Fish Farming*
+*Developed by Engr. Flourish Olaiya*

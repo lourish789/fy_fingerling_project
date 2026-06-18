@@ -1,612 +1,1260 @@
-
 <!DOCTYPE html>
-<html>
+<html lang="en" data-theme="dark">
 <head>
-    <title>Fingerling Counter Dashboard</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
-    <!-- Chart.js removed -->
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-            color: #fff;
-            min-height: 100vh;
-            padding: 20px;
-        }
-        .header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
-        }
-        .dashboard {
-            display: grid;
-            grid-template-columns: 2fr 1fr;
-            gap: 20px;
-            max-width: 1600px;
-            margin: 0 auto;
-        }
-        .card {
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 15px;
-            padding: 20px;
-            backdrop-filter: blur(10px);
-        }
-        h1 {
-            font-size: 2em;
-            color: #00d4ff;
-        }
-        h2 {
-            margin-bottom: 15px;
-            color: #00d4ff;
-        }
-        .video-container {
-            border-radius: 10px;
-            overflow: hidden;
-            position: relative;
-        }
-        .video-container img {
-            width: 100%;
-            border-radius: 10px;
-        }
-        .live-indicator {
-            position: absolute;
-            top: 10px;
-            right: 10px;
-            background: #ff0000;
-            padding: 5px 10px;
-            border-radius: 5px;
-            font-size: 0.8em;
-            animation: pulse 1s infinite;
-            display: none;
-        }
-        .live-indicator.active {
-            display: block;
-        }
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 15px;
-        }
-        .stat-box {
-            background: rgba(0, 212, 255, 0.1);
-            padding: 20px;
-            border-radius: 10px;
-            text-align: center;
-            border: 1px solid rgba(0, 212, 255, 0.3);
-        }
-        .stat-value {
-            font-size: 2.5em;
-            font-weight: bold;
-        }
-        .stat-label {
-            font-size: 0.9em;
-            color: #aaa;
-            margin-top: 5px;
-        }
-        .fingerling { color: #00ff00; }
-        .post-fingerling { color: #ffbf00; }
-        .juvenile { color: #ffa500; }
-        .unknown { color: #a0a0a0; }
-        .total { color: #00d4ff; }
-        /* Chart UI removed per user request */
-        .status-bar {
-            display: flex;
-            justify-content: space-between;
-            margin-top: 10px;
-            padding: 10px;
-            background: rgba(0, 0, 0, 0.3);
-            border-radius: 5px;
-            font-size: 0.9em;
-        }
-        .upload-section {
-            margin-top: 20px;
-        }
-        .input-group {
-            margin-bottom: 15px;
-        }
-        .input-group label {
-            display: block;
-            margin-bottom: 5px;
-            color: #aaa;
-        }
-        .input-group input[type="text"],
-        .input-group input[type="file"] {
-            width: 100%;
-            padding: 10px;
-            border: 1px solid rgba(0, 212, 255, 0.3);
-            border-radius: 5px;
-            background: rgba(0, 0, 0, 0.3);
-            color: #fff;
-        }
-        .input-group input[type="file"] {
-            cursor: pointer;
-        }
-        .btn {
-            padding: 10px 20px;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 1em;
-            margin-right: 10px;
-            margin-bottom: 10px;
-            transition: all 0.3s;
-        }
-        .btn-primary {
-            background: #00d4ff;
-            color: #000;
-        }
-        .btn-primary:hover {
-            background: #00a8cc;
-        }
-        .btn-success {
-            background: #00ff00;
-            color: #000;
-        }
-        .btn-danger {
-            background: #ff4444;
-            color: #fff;
-        }
-        .btn-secondary {
-            background: rgba(255, 255, 255, 0.2);
-            color: #fff;
-        }
-        .btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-        .button-group {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-        }
-        .processing-status {
-            padding: 10px;
-            border-radius: 5px;
-            margin-top: 10px;
-            display: none;
-        }
-        .processing-status.active {
-            display: block;
-            background: rgba(0, 212, 255, 0.2);
-            animation: pulse 2s infinite;
-        }
-        .processing-status.error {
-            display: block;
-            background: rgba(255, 0, 0, 0.2);
-        }
-        .processing-status.success {
-            display: block;
-            background: rgba(0, 255, 0, 0.2);
-        }
-        .tabs {
-            display: flex;
-            margin-bottom: 15px;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.2);
-        }
-        .tab {
-            padding: 10px 20px;
-            cursor: pointer;
-            border-bottom: 2px solid transparent;
-            transition: all 0.3s;
-        }
-        .tab.active {
-            color: #00d4ff;
-            border-bottom-color: #00d4ff;
-        }
-        .tab-content {
-            display: none;
-        }
-        .tab-content.active {
-            display: block;
-        }
-        .source-info {
-            font-size: 0.8em;
-            color: #888;
-            margin-top: 5px;
-        }
-        @media (max-width: 1200px) {
-            .dashboard {
-                grid-template-columns: 1fr;
-            }
-        }
-    </style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AquaCount — Catfish Fingerling Intelligence System</title>
+
+  <!-- External dependencies -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+
+  <style>
+    /* ─── CSS Custom Properties ─────────────────────────────────────── */
+    :root {
+      --bg-base:     #0a0f1e;
+      --bg-surface:  #0e1628;
+      --bg-card:     rgba(255,255,255,0.04);
+      --bg-card-hover: rgba(255,255,255,0.07);
+      --border:      rgba(255,255,255,0.08);
+      --border-accent: rgba(0,212,255,0.35);
+      --accent:      #00d4ff;
+      --accent-dim:  rgba(0,212,255,0.15);
+      --success:     #00ff88;
+      --warning:     #ffb347;
+      --danger:      #ff4d6d;
+      --purple:      #a855f7;
+      --text-primary: #e2e8f0;
+      --text-muted:  #6b7a99;
+      --text-dim:    #3d4f6e;
+      --shadow:      0 8px 32px rgba(0,0,0,0.4);
+      --radius:      12px;
+      --radius-sm:   8px;
+      --font:        'Inter', 'Segoe UI', system-ui, sans-serif;
+      --mono:        'JetBrains Mono', 'Fira Code', monospace;
+      --transition:  0.2s ease;
+    }
+    [data-theme="light"] {
+      --bg-base:    #f0f4f8;
+      --bg-surface: #ffffff;
+      --bg-card:    rgba(0,0,0,0.03);
+      --bg-card-hover: rgba(0,0,0,0.06);
+      --border:     rgba(0,0,0,0.08);
+      --border-accent: rgba(0,150,200,0.4);
+      --accent:     #0089b0;
+      --accent-dim: rgba(0,137,176,0.12);
+      --text-primary: #1a202c;
+      --text-muted:  #718096;
+      --text-dim:    #a0aec0;
+      --shadow:      0 4px 20px rgba(0,0,0,0.1);
+    }
+
+    /* ─── Reset & Base ──────────────────────────────────────────────── */
+    *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+    html { font-size:15px; }
+    body {
+      font-family: var(--font);
+      background: var(--bg-base);
+      color: var(--text-primary);
+      min-height: 100vh;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: var(--accent); text-decoration: none; }
+
+    /* ─── Scrollbar ─────────────────────────────────────────────────── */
+    ::-webkit-scrollbar { width:6px; height:6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--text-dim); border-radius:3px; }
+
+    /* ─── Layout ────────────────────────────────────────────────────── */
+    .app-shell {
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+    }
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+      height: 60px;
+      background: var(--bg-surface);
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      box-shadow: var(--shadow);
+    }
+    .topbar-left {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .logo-icon {
+      width: 36px;
+      height: 36px;
+      background: linear-gradient(135deg, var(--accent), #0050ff);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      flex-shrink: 0;
+    }
+    .logo-text {
+      display: flex;
+      flex-direction: column;
+      line-height: 1.1;
+    }
+    .logo-title {
+      font-size: 1.05rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: var(--text-primary);
+    }
+    .logo-sub {
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      font-family: var(--mono);
+      letter-spacing: 0.04em;
+    }
+    .topbar-right {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .conn-badge {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      font-family: var(--mono);
+      background: var(--accent-dim);
+      border: 1px solid var(--border-accent);
+      color: var(--accent);
+      transition: var(--transition);
+    }
+    .conn-badge.disconnected {
+      background: rgba(255,77,109,0.12);
+      border-color: rgba(255,77,109,0.3);
+      color: var(--danger);
+    }
+    .conn-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: currentColor;
+      animation: ping 1.5s ease-in-out infinite;
+    }
+    .conn-badge.disconnected .conn-dot { animation: none; }
+    @keyframes ping {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.5; transform: scale(0.8); }
+    }
+    .icon-btn {
+      width: 36px;
+      height: 36px;
+      border-radius: var(--radius-sm);
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1rem;
+      transition: var(--transition);
+    }
+    .icon-btn:hover { background: var(--bg-card-hover); color: var(--text-primary); }
+
+    /* ─── Main Content Grid ──────────────────────────────────────────── */
+    .main-content {
+      display: grid;
+      grid-template-columns: 1fr 360px;
+      gap: 0;
+      flex: 1;
+      min-height: 0;
+    }
+    @media (max-width: 1100px) {
+      .main-content { grid-template-columns: 1fr; }
+    }
+
+    /* ─── Left Panel ─────────────────────────────────────────────────── */
+    .left-panel {
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      overflow-y: auto;
+    }
+
+    /* ─── Card ───────────────────────────────────────────────────────── */
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      transition: var(--transition);
+    }
+    .card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border);
+    }
+    .card-title {
+      font-size: 0.8rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .card-title-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+    }
+    .card-body { padding: 16px 18px; }
+
+    /* ─── Video Feed ─────────────────────────────────────────────────── */
+    .video-card { }
+    .video-wrapper {
+      position: relative;
+      background: #000;
+      overflow: hidden;
+      cursor: crosshair;
+    }
+    .video-feed-img {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 480px;
+      object-fit: contain;
+      transform-origin: center center;
+      transition: transform 0.15s ease;
+      will-change: transform;
+    }
+    .video-placeholder {
+      width: 100%;
+      height: 320px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      color: var(--text-dim);
+      background: #060c18;
+    }
+    .video-placeholder-icon { font-size: 48px; opacity: 0.3; }
+    .video-placeholder-text { font-size: 0.85rem; }
+    .live-badge {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      background: rgba(255,0,0,0.9);
+      color: #fff;
+      font-size: 0.7rem;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      padding: 3px 9px;
+      border-radius: 4px;
+      display: none;
+    }
+    .live-badge.active { display: block; animation: livePulse 1s ease-in-out infinite; }
+    @keyframes livePulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.6; }
+    }
+    .video-status-bar {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      padding: 8px 14px;
+      background: rgba(0,0,0,0.5);
+      font-size: 0.72rem;
+      font-family: var(--mono);
+      color: var(--text-muted);
+      border-top: 1px solid var(--border);
+      flex-wrap: wrap;
+    }
+    .status-item { display: flex; align-items: center; gap: 5px; }
+    .status-label { color: var(--text-dim); }
+    .status-val { color: var(--text-muted); }
+
+    /* ─── Zoom Controls ──────────────────────────────────────────────── */
+    .zoom-controls {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 16px;
+      background: var(--bg-surface);
+      border-top: 1px solid var(--border);
+    }
+    .zoom-label {
+      font-size: 0.72rem;
+      font-family: var(--mono);
+      color: var(--text-muted);
+      white-space: nowrap;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .zoom-slider {
+      flex: 1;
+      -webkit-appearance: none;
+      appearance: none;
+      height: 4px;
+      border-radius: 2px;
+      background: var(--border);
+      outline: none;
+      cursor: pointer;
+    }
+    .zoom-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: var(--accent);
+      cursor: pointer;
+      box-shadow: 0 0 6px rgba(0,212,255,0.5);
+    }
+    .zoom-slider::-moz-range-thumb {
+      width: 14px;
+      height: 14px;
+      border: none;
+      border-radius: 50%;
+      background: var(--accent);
+      cursor: pointer;
+    }
+    .zoom-presets { display: flex; gap: 5px; }
+    .zoom-preset-btn {
+      padding: 3px 8px;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+      background: var(--bg-card);
+      color: var(--text-muted);
+      font-size: 0.7rem;
+      font-family: var(--mono);
+      cursor: pointer;
+      transition: var(--transition);
+    }
+    .zoom-preset-btn:hover,
+    .zoom-preset-btn.active {
+      background: var(--accent-dim);
+      border-color: var(--border-accent);
+      color: var(--accent);
+    }
+    .zoom-val-display {
+      font-size: 0.72rem;
+      font-family: var(--mono);
+      color: var(--accent);
+      min-width: 36px;
+      text-align: right;
+    }
+
+    /* ─── Tabs ───────────────────────────────────────────────────────── */
+    .tab-list {
+      display: flex;
+      border-bottom: 1px solid var(--border);
+      overflow-x: auto;
+    }
+    .tab-btn {
+      padding: 10px 18px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      cursor: pointer;
+      border: none;
+      background: none;
+      border-bottom: 2px solid transparent;
+      white-space: nowrap;
+      transition: var(--transition);
+    }
+    .tab-btn:hover { color: var(--text-primary); }
+    .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .tab-pane { display: none; padding: 16px 18px; }
+    .tab-pane.active { display: block; }
+
+    /* ─── Form Elements ──────────────────────────────────────────────── */
+    .field { margin-bottom: 12px; }
+    .field label {
+      display: block;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-bottom: 5px;
+      font-weight: 600;
+    }
+    .field input[type="text"],
+    .field input[type="file"] {
+      width: 100%;
+      padding: 8px 12px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text-primary);
+      font-size: 0.85rem;
+      font-family: var(--font);
+      transition: var(--transition);
+      outline: none;
+    }
+    .field input[type="text"]:focus,
+    .field input[type="file"]:focus {
+      border-color: var(--border-accent);
+      box-shadow: 0 0 0 3px rgba(0,212,255,0.08);
+    }
+    .field input[type="file"] { cursor: pointer; padding: 7px 10px; }
+    .hint { font-size: 0.72rem; color: var(--text-dim); margin-top: 4px; }
+
+    /* ─── Buttons ────────────────────────────────────────────────────── */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 8px 16px;
+      border-radius: var(--radius-sm);
+      border: 1px solid transparent;
+      font-size: 0.82rem;
+      font-weight: 600;
+      font-family: var(--font);
+      cursor: pointer;
+      transition: var(--transition);
+      white-space: nowrap;
+    }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-primary { background: var(--accent); color: #000; }
+    .btn-primary:hover:not(:disabled) { background: #00b8d9; }
+    .btn-success { background: var(--success); color: #000; }
+    .btn-success:hover:not(:disabled) { background: #00d970; }
+    .btn-danger { background: var(--danger); color: #fff; border-color: var(--danger); }
+    .btn-danger:hover:not(:disabled) { background: #ff2a50; }
+    .btn-ghost {
+      background: var(--bg-card);
+      border-color: var(--border);
+      color: var(--text-muted);
+    }
+    .btn-ghost:hover:not(:disabled) { background: var(--bg-card-hover); color: var(--text-primary); }
+    .btn-group { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+
+    /* ─── Status Banner ──────────────────────────────────────────────── */
+    .status-banner {
+      display: none;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      border-radius: var(--radius-sm);
+      font-size: 0.8rem;
+      margin-top: 12px;
+    }
+    .status-banner.info { display:flex; background:rgba(0,212,255,0.1); border:1px solid rgba(0,212,255,0.2); color:var(--accent); animation: statusPulse 2s ease-in-out infinite; }
+    .status-banner.success { display:flex; background:rgba(0,255,136,0.1); border:1px solid rgba(0,255,136,0.2); color:var(--success); }
+    .status-banner.error { display:flex; background:rgba(255,77,109,0.1); border:1px solid rgba(255,77,109,0.2); color:var(--danger); }
+    @keyframes statusPulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
+    }
+
+    /* ─── Right Panel ────────────────────────────────────────────────── */
+    .right-panel {
+      background: var(--bg-surface);
+      border-left: 1px solid var(--border);
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ─── Stats Grid ─────────────────────────────────────────────────── */
+    .stats-section { padding: 18px; }
+    .stats-section-title {
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .stats-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    .stat-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px;
+      position: relative;
+      overflow: hidden;
+      transition: var(--transition);
+    }
+    .stat-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 2px;
+      background: var(--stat-color, var(--accent));
+    }
+    .stat-card:hover { background: var(--bg-card-hover); }
+    .stat-value {
+      font-size: 2rem;
+      font-weight: 800;
+      font-family: var(--mono);
+      color: var(--stat-color, var(--accent));
+      line-height: 1;
+      margin-bottom: 4px;
+      transition: all 0.3s ease;
+    }
+    .stat-label {
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      font-weight: 600;
+      letter-spacing: 0.03em;
+    }
+    .stat-icon {
+      position: absolute;
+      top: 10px;
+      right: 12px;
+      font-size: 1.2rem;
+      opacity: 0.25;
+    }
+    .stat-card.total    { --stat-color: var(--accent); }
+    .stat-card.fingerling { --stat-color: var(--success); }
+    .stat-card.post     { --stat-color: var(--warning); }
+    .stat-card.juvenile { --stat-color: #fb923c; }
+    .stat-card.unknown  { --stat-color: var(--text-muted); }
+    .stat-card.active   { --stat-color: var(--purple); }
+
+    /* ─── Chart ──────────────────────────────────────────────────────── */
+    .chart-section {
+      padding: 0 18px 18px;
+      border-top: 1px solid var(--border);
+      margin-top: 4px;
+    }
+    .chart-section .stats-section-title { padding-top: 16px; }
+    .chart-wrap { height: 160px; position: relative; }
+
+    /* ─── Divider ────────────────────────────────────────────────────── */
+    .divider { height: 1px; background: var(--border); margin: 0 18px; }
+
+    /* ─── Batch Results ──────────────────────────────────────────────── */
+    .batch-section { padding: 18px; flex: 1; }
+    .batch-result-list {
+      max-height: 340px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .batch-result-item {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 10px 12px;
+      font-size: 0.78rem;
+    }
+    .batch-result-item.success { border-left: 3px solid var(--success); }
+    .batch-result-item.error { border-left: 3px solid var(--danger); }
+    .batch-result-name { font-weight: 600; margin-bottom: 6px; }
+    .batch-result-name.success { color: var(--success); }
+    .batch-result-name.error { color: var(--danger); }
+    .batch-result-img {
+      width: 100%;
+      max-height: 140px;
+      object-fit: contain;
+      border-radius: 4px;
+      margin-bottom: 8px;
+      border: 1px solid var(--border);
+    }
+    .batch-counts-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4px 10px;
+      font-size: 0.75rem;
+    }
+    .batch-counts-grid span:first-child { color: var(--text-dim); }
+    .batch-summary-text {
+      margin-top: 6px;
+      padding-top: 6px;
+      border-top: 1px solid var(--border);
+      color: var(--text-dim);
+      font-size: 0.72rem;
+    }
+    .batch-totals-box {
+      background: var(--accent-dim);
+      border: 1px solid var(--border-accent);
+      border-radius: var(--radius-sm);
+      padding: 10px 12px;
+      margin-bottom: 10px;
+      font-size: 0.78rem;
+    }
+    .batch-totals-title {
+      color: var(--accent);
+      font-weight: 700;
+      margin-bottom: 6px;
+      font-size: 0.72rem;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+    .batch-totals-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4px 10px;
+    }
+
+    /* ─── Instructions Panel ─────────────────────────────────────────── */
+    .instructions-section {
+      padding: 16px 18px;
+      border-top: 1px solid var(--border);
+    }
+    .instruction-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 6px 0;
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--border);
+    }
+    .instruction-item:last-child { border-bottom: none; }
+    .instruction-item-icon {
+      font-size: 0.85rem;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    /* ─── Footer ─────────────────────────────────────────────────────── */
+    .app-footer {
+      padding: 12px 24px;
+      border-top: 1px solid var(--border);
+      font-size: 0.72rem;
+      color: var(--text-dim);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-family: var(--mono);
+      background: var(--bg-surface);
+    }
+    .footer-build { display: flex; gap: 14px; }
+    .footer-build span { display: flex; align-items: center; gap: 4px; }
+
+    /* ─── Animations ─────────────────────────────────────────────────── */
+    .count-flash {
+      animation: flashCount 0.4s ease-out;
+    }
+    @keyframes flashCount {
+      0% { transform: scale(1.2); }
+      100% { transform: scale(1); }
+    }
+  </style>
 </head>
 <body>
-    <div class="header">
-        <h1>🐟 Catfish Fingerling Counter</h1>
-        <div>
-            <span id="connection-status" style="color: #00ff00;">● Connected</span>
-        </div>
+<div class="app-shell">
+
+  <!-- ── Top Bar ──────────────────────────────────────────────────────── -->
+  <header class="topbar">
+    <div class="topbar-left">
+      <div class="logo-icon">&#x1F41F;</div>
+      <div class="logo-text">
+        <span class="logo-title">AquaCount</span>
+        <span class="logo-sub">CATFISH FINGERLING INTELLIGENCE SYSTEM</span>
+      </div>
     </div>
-    
-    <div class="dashboard">
-        <div>
-            <div class="card">
-                <h2>Live Video Feed</h2>
-                <div class="video-container">
-                    <img alt="Video Feed" id="video-feed">
-                    <div class="live-indicator" id="live-indicator">🔴 LIVE</div>
-                </div>
-                <div class="status-bar">
-                    <span>Frame: <span id="frame">0</span></span>
-                    <span>FPS: <span id="fps">0</span></span>
-                    <span>Source: <span id="source-type">-</span></span>
-                    <span id="timestamp"></span>
-                </div>
-            </div>
-            
-            <div class="card upload-section">
-                <h2>Input Source</h2>
-                <div class="tabs">
-                    <div class="tab active" data-tab="camera">Camera</div>
-                    <div class="tab" data-tab="upload">Upload File</div>
-                    <div class="tab" data-tab="batch">Batch Images</div>
-                    <div class="tab" data-tab="url">Video URL</div>
-                </div>
-                
-                <div class="tab-content active" id="tab-camera">
-                    <div class="input-group">
-                        <label>Camera Index (0 = default webcam)</label>
-                        <input type="text" id="camera-index" value="0" placeholder="0">
-                    </div>
-                    <button class="btn btn-success" onclick="startCamera()">📷 Start Camera</button>
-                </div>
-                
-                <div class="tab-content" id="tab-upload">
-                    <div class="input-group">
-                        <label>Upload Video or Image</label>
-                        <input type="file" id="file-input" accept="video/*,image/*">
-                    </div>
-                    <button class="btn btn-primary" onclick="uploadFile()">📤 Upload & Process</button>
-                </div>
-                
-                <div class="tab-content" id="tab-batch">
-                    <div class="input-group">
-                        <label>Upload Multiple Images for Batch Analysis</label>
-                        <input type="file" id="batch-file-input" accept="image/*" multiple>
-                    </div>
-                    <div style="font-size: 0.85em; color: #888; margin-bottom: 15px;">
-                        Select multiple image files to process. Results will show annotated images with detailed counts per class.
-                    </div>
-                    <button class="btn btn-primary" onclick="uploadBatch()">📁 Upload & Analyze</button>
-                    <div id="batch-progress" style="margin-top: 10px; display: none;">
-                        <div style="font-size: 0.9em; color: #00d4ff;">Files processed: <span id="batch-count">0</span></div>
-                        <div id="batch-results-list" style="max-height: 600px; overflow-y: auto; margin-top: 10px; font-size: 0.85em;"></div>
-                    </div>
-                </div>
-                
-                <div class="tab-content" id="tab-url">
-                    <div class="input-group">
-                        <label>Video URL (YouTube, direct link, RTSP)</label>
-                        <input type="text" id="url-input" placeholder="https://www.youtube.com/watch?v=...">
-                    </div>
-                    <button class="btn btn-primary" onclick="processUrl()">🔗 Process URL</button>
-                </div>
-                
-                <div class="button-group" style="margin-top: 15px;">
-                    <button class="btn btn-danger" onclick="stopProcessing()">⏹ Stop</button>
-                    <button class="btn btn-secondary" onclick="resetCounts()">🔄 Reset Counts</button>
-                </div>
-                
-                <div class="processing-status" id="processing-status">
-                    <span id="status-message">Processing...</span>
-                </div>
-            </div>
-        </div>
-        
-        <div>
-            <div class="card">
-                <h2>Count Summary</h2>
-                <div class="stats-grid">
-                    <div class="stat-box">
-                        <div class="stat-value total" id="total">0</div>
-                        <div class="stat-label">Total Counted</div>
-                    </div>
-                    <div class="stat-box">
-                        <div class="stat-value fingerling" id="fingerling">0</div>
-                        <div class="stat-label">Fingerling</div>
-                    </div>
-                    <div class="stat-box">
-                        <div class="stat-value post-fingerling" id="post_fingerling">0</div>
-                        <div class="stat-label">Post-Fingerling</div>
-                    </div>
-                    <div class="stat-box">
-                        <div class="stat-value juvenile" id="juvenile">0</div>
-                        <div class="stat-label">Juvenile</div>
-                    </div>
-                    <div class="stat-box">
-                        <div class="stat-value unknown" id="unknown">0</div>
-                        <div class="stat-label">Unknown</div>
-                    </div>
-                    <div class="stat-box">
-                        <div class="stat-value" id="active" style="color: #9b59b6;">0</div>
-                        <div class="stat-label">Current Visible</div>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Class Distribution chart removed -->
-            
-            <div class="card" style="margin-top: 20px;">
-                <h2>Instructions</h2>
-                <ul style="padding-left: 20px; line-height: 1.8;">
-                    <li>Select input source (camera, file, or URL)</li>
-                    <li>Fingerlings crossing the line are counted</li>
-                    <li>Counts are grouped by class labels automatically</li>
-                    <li>Click "Reset Counts" to start over</li>
-                    <li>Supports: MP4, AVI, MOV, JPG, PNG</li>
-                    <li>YouTube URLs supported with yt-dlp</li>
-                </ul>
-            </div>
-        </div>
+    <div class="topbar-right">
+      <div class="conn-badge" id="conn-badge">
+        <span class="conn-dot"></span>
+        <span id="conn-label">Connecting…</span>
+      </div>
+      <button class="icon-btn" id="theme-toggle" title="Toggle theme" onclick="toggleTheme()">&#9790;</button>
     </div>
-    
-    <script>
-        const urlParams = new URLSearchParams(window.location.search);
-        const API_BASE = urlParams.get('backend') || (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' ? 'http://localhost:5000' : 'https://your-render-backend-url-here');
-        const socket = io(API_BASE, { transports: ['polling'], upgrade: false });
-        let isProcessing = false;
-        
-        // Chart removed: distribution chart disabled per user request
-        
-        // Tab switching
-        document.querySelectorAll('.tab').forEach(tab => {
-            tab.addEventListener('click', () => {
-                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-                tab.classList.add('active');
-                document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
-            });
-        });
-        
-        // Socket events
-        function setVideoFeedActive(active) {
-            const videoFeed = document.getElementById('video-feed');
-            if (active) {
-                videoFeed.src = API_BASE + '/video_feed?ts=' + Date.now();
-            } else {
-                videoFeed.removeAttribute('src');
-            }
-        }
+  </header>
 
-        socket.on('update', function(data) {
-            document.getElementById('total').textContent = data.counts.total || 0;
-            document.getElementById('fingerling').textContent = data.counts.fingerling || 0;
-            document.getElementById('post_fingerling').textContent = data.counts.post_fingerling || 0;
-            document.getElementById('juvenile').textContent = data.counts.juvenile || 0;
-            document.getElementById('unknown').textContent = data.counts.unknown || 0;
-            document.getElementById('active').textContent = data.active_tracks || 0;
-            document.getElementById('frame').textContent = data.frame_number;
-            document.getElementById('fps').textContent = data.fps.toFixed(1);
-            document.getElementById('source-type').textContent = data.source_type || 'video';
-            document.getElementById('timestamp').textContent = new Date().toLocaleTimeString();
-            
-            const liveIndicator = document.getElementById('live-indicator');
-            if (data.is_live) {
-                liveIndicator.classList.add('active');
-            } else {
-                liveIndicator.classList.remove('active');
-            }
-            
-            // distribution chart removed; UI shows numeric stats only
-        });
+  <!-- ── Main ─────────────────────────────────────────────────────────── -->
+  <div class="main-content">
 
-        socket.on('connect', function() {
-            document.getElementById('connection-status').innerHTML = '● Connected';
-            document.getElementById('connection-status').style.color = '#00ff00';
-        });
+    <!-- Left Column -->
+    <div class="left-panel">
 
-        socket.on('disconnect', function() {
-            document.getElementById('connection-status').innerHTML = '● Disconnected';
-            document.getElementById('connection-status').style.color = '#ff0000';
-        });
+      <!-- Video Feed Card -->
+      <div class="card video-card">
+        <div class="card-header">
+          <span class="card-title"><span class="card-title-dot"></span>Live Video Feed</span>
+          <span id="timestamp" style="font-size:0.72rem;font-family:var(--mono);color:var(--text-dim)"></span>
+        </div>
+        <div class="video-wrapper" id="video-wrapper">
+          <div class="video-placeholder" id="video-placeholder">
+            <div class="video-placeholder-icon">&#x1F4F9;</div>
+            <div class="video-placeholder-text">No active source — select an input below</div>
+          </div>
+          <img class="video-feed-img" id="video-feed" alt="Video Feed" style="display:none;" />
+          <div class="live-badge" id="live-badge">&#x25CF; LIVE</div>
+        </div>
 
-        socket.on('processing_started', function(data) {
-            isProcessing = true;
-            if (data.type === 'camera' || data.type === 'upload' || data.type === 'url') {
-                setVideoFeedActive(true);
-            }
-            showStatus('Processing started: ' + (data.source || 'unknown'), 'active');
-        });
+        <!-- Zoom Controls -->
+        <div class="zoom-controls">
+          <span class="zoom-label">&#x1F50D; ZOOM</span>
+          <input
+            class="zoom-slider"
+            id="zoom-slider"
+            type="range"
+            min="1" max="4" step="0.1" value="1"
+          />
+          <span class="zoom-val-display" id="zoom-val">1.0×</span>
+          <div class="zoom-presets">
+            <button class="zoom-preset-btn active" onclick="setZoom(1)">1×</button>
+            <button class="zoom-preset-btn" onclick="setZoom(2)">2×</button>
+            <button class="zoom-preset-btn" onclick="setZoom(4)">4×</button>
+          </div>
+        </div>
 
-        socket.on('processing_completed', function() {
-            isProcessing = false;
-            setVideoFeedActive(false);
-            showStatus('Processing completed', 'success');
-        });
+        <!-- Status Bar -->
+        <div class="video-status-bar">
+          <div class="status-item">
+            <span class="status-label">FRAME</span>
+            <span class="status-val" id="s-frame">—</span>
+          </div>
+          <div class="status-item">
+            <span class="status-label">FPS</span>
+            <span class="status-val" id="s-fps">—</span>
+          </div>
+          <div class="status-item">
+            <span class="status-label">SOURCE</span>
+            <span class="status-val" id="s-source">—</span>
+          </div>
+          <div class="status-item" style="margin-left:auto;">
+            <span class="status-val" id="s-time"></span>
+          </div>
+        </div>
+      </div>
 
-        socket.on('processing_error', function(data) {
-            isProcessing = false;
-            setVideoFeedActive(false);
-            showStatus('Error: ' + data.error, 'error');
-        });
+      <!-- Input Source Card -->
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title"><span class="card-title-dot"></span>Input Source</span>
+        </div>
 
-        socket.on('counts_reset', function() {
-            document.getElementById('total').textContent = '0';
-            document.getElementById('fingerling').textContent = '0';
-            document.getElementById('post_fingerling').textContent = '0';
-            document.getElementById('juvenile').textContent = '0';
-            document.getElementById('unknown').textContent = '0';
-            document.getElementById('active').textContent = '0';
-            // distribution chart removed; reset handled by numeric UI
-            setVideoFeedActive(false);
-        });
+        <div class="tab-list" role="tablist">
+          <button class="tab-btn active" data-tab="camera" onclick="switchTab(this)">&#x1F4F7; Camera</button>
+          <button class="tab-btn" data-tab="upload" onclick="switchTab(this)">&#x1F4E4; Upload File</button>
+          <button class="tab-btn" data-tab="batch" onclick="switchTab(this)">&#x1F4C1; Batch Images</button>
+          <button class="tab-btn" data-tab="url" onclick="switchTab(this)">&#x1F517; Video URL</button>
+        </div>
 
-        socket.on('batch_results', function(data) {
-            const resultsList = document.getElementById('batch-results-list');
-            let html = '<div style="border-top: 1px solid rgba(255,255,255,0.2); padding-top: 10px;">';
-            
-            // Display batch totals summary
-            const batchTotals = data.batch_totals || {};
-            html += `<div style="background: rgba(0, 212, 255, 0.1); padding: 10px; border-radius: 5px; margin-bottom: 15px; border-left: 3px solid #00d4ff;">
-                <div style="font-weight: bold; color: #00d4ff; margin-bottom: 5px;">📊 Batch Totals by Type</div>
-                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; font-size: 0.85em;">
-                    <div><span style="color: #00d4ff;">Total:</span> <span style="color: #fff; font-weight: bold;">${batchTotals.total || 0}</span></div>
-                    <div><span style="color: #00ff00;">Fingerling:</span> <span style="color: #00ff00; font-weight: bold;">${batchTotals.fingerling || 0}</span></div>
-                    <div><span style="color: #ffbf00;">Post-Fingerling:</span> <span style="color: #ffbf00; font-weight: bold;">${batchTotals.post_fingerling || 0}</span></div>
-                    <div><span style="color: #ffa500;">Juvenile:</span> <span style="color: #ffa500; font-weight: bold;">${batchTotals.juvenile || 0}</span></div>
-                    <div><span style="color: #a0a0a0;">Unknown:</span> <span style="color: #a0a0a0; font-weight: bold;">${batchTotals.unknown || 0}</span></div>
-                </div>
-            </div>`;
-            
-            // Display per-image results with annotations
-            html += '<div style="font-weight: bold; color: #00d4ff; margin-bottom: 10px;">🖼️ Per-Image Results</div>';
+        <!-- Camera Tab -->
+        <div class="tab-pane active" id="tab-camera">
+          <div class="field">
+            <label>Camera Index</label>
+            <input type="text" id="camera-index" value="0" placeholder="0 = default webcam" />
+            <div class="hint">Try 0, 1, or 2 for USB cameras. RTSP streams are set in the URL tab.</div>
+          </div>
+          <button class="btn btn-success" onclick="startCamera()">&#x25B6; Start Camera</button>
+        </div>
 
-            data.results.forEach((result, idx) => {
-                const status = result.status === 'success' ? '✓' : '✗';
-                const color = result.status === 'success' ? '#00ff00' : '#ff4444';
-                
-                html += `<div style="background: rgba(255,255,255,0.05); border-left: 3px solid ${color}; padding: 10px; margin-bottom: 10px; border-radius: 3px;">
-                    <div style="color: ${color}; font-weight: bold; margin-bottom: 8px;">${status} ${result.filename}</div>`;
-                
-                if (result.status === 'success') {
-                    const counts = result.counts || {};
-                    
-                    // Show annotated image if available
-                    if (result.annotated_image) {
-                        html += `<img src="data:image/jpeg;base64,${result.annotated_image}" style="width: 100%; max-width: 200px; border-radius: 5px; margin-bottom: 8px; border: 1px solid rgba(0,212,255,0.3);">`;
-                    }
-                    
-                    // Show per-image counts by class
-                    html += `<div style="font-size: 0.85em; display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;">
-                        <div><span style="color: #00d4ff;">Total:</span> <span style="font-weight: bold;">${counts.total || 0}</span></div>
-                        <div><span style="color: #00ff00;">Fingerling:</span> <span style="color: #00ff00; font-weight: bold;">${counts.fingerling || 0}</span></div>
-                        <div><span style="color: #ffbf00;">Post-Fingerling:</span> <span style="color: #ffbf00; font-weight: bold;">${counts.post_fingerling || 0}</span></div>
-                        <div><span style="color: #ffa500;">Juvenile:</span> <span style="color: #ffa500; font-weight: bold;">${counts.juvenile || 0}</span></div>
-                        <div><span style="color: #a0a0a0;">Unknown:</span> <span style="color: #a0a0a0; font-weight: bold;">${counts.unknown || 0}</span></div>
-                    </div>`;
-                    
-                    // Show label summary
-                    const labelSummary = result.label_summary || 'No detections';
-                    html += `<div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.1); color: #aaa; font-size: 0.8em;">Summary: ${labelSummary}</div>`;
-                } else if (result.error) {
-                    html += `<div style="color: #ff4444; font-size: 0.85em;">Error: ${result.error}</div>`;
-                }
-                
-                html += '</div>';
-            });
+        <!-- Upload Tab -->
+        <div class="tab-pane" id="tab-upload">
+          <div class="field">
+            <label>Upload Video or Image</label>
+            <input type="file" id="file-input" accept="video/*,image/*" />
+            <div class="hint">Supports MP4, AVI, MOV, JPG, PNG (max 500 MB)</div>
+          </div>
+          <button class="btn btn-primary" onclick="uploadFile()">&#x1F4E4; Upload &amp; Process</button>
+        </div>
 
-            html += '</div>';
-            resultsList.innerHTML = html;
-            showStatus(`Batch processing complete: ${data.total_files} file(s)`, 'success');
-        });
+        <!-- Batch Tab -->
+        <div class="tab-pane" id="tab-batch">
+          <div class="field">
+            <label>Upload Multiple Images</label>
+            <input type="file" id="batch-file-input" accept="image/*" multiple />
+            <div class="hint">
+              Select multiple images. Each image is analysed independently and
+              results are shown below with annotated thumbnails.
+            </div>
+          </div>
+          <button class="btn btn-primary" onclick="uploadBatch()">&#x1F4CA; Analyse Batch</button>
+          <div id="batch-progress" style="margin-top:10px;display:none;">
+            <div style="font-size:0.78rem;color:var(--accent);">Files processed: <strong id="batch-count">0</strong></div>
+          </div>
+        </div>
 
-        socket.on('batch_csv_saved', function(data) {
-            showStatus('Batch CSV saved: ' + data.csv_path, 'success');
-        });
+        <!-- URL Tab -->
+        <div class="tab-pane" id="tab-url">
+          <div class="field">
+            <label>Video URL</label>
+            <input type="text" id="url-input" placeholder="YouTube URL, RTSP stream, or direct MP4 link" />
+            <div class="hint">YouTube, RTSP://, RTMP://, and direct HTTP video URLs are supported.</div>
+          </div>
+          <button class="btn btn-primary" onclick="processUrl()">&#x1F310; Process URL</button>
+        </div>
 
-        function showStatus(message, type) {
-            const statusEl = document.getElementById('processing-status');
-            const msgEl = document.getElementById('status-message');
-            statusEl.className = 'processing-status ' + type;
-            msgEl.textContent = message;
-        }
-        
-        function startCamera() {
-            const index = document.getElementById('camera-index').value || 0;
-            fetch(API_BASE + '/api/start_camera', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({camera_index: parseInt(index)})
-            }).then(r => r.json()).then(data => {
-                if (data.success) showStatus('Starting camera...', 'active');
-            });
-        }
-        
-        function uploadFile() {
-            const fileInput = document.getElementById('file-input');
-            if (!fileInput.files.length) {
-                alert('Please select a file');
-                return;
-            }
-            
-            const formData = new FormData();
-            formData.append('file', fileInput.files[0]);
-            
-            showStatus('Uploading file...', 'active');
-            
-            fetch(API_BASE + '/api/upload', {
-                method: 'POST',
-                body: formData
-            }).then(r => r.json()).then(data => {
-                if (data.success) {
-                    showStatus('File uploaded, processing...', 'active');
-                } else {
-                    showStatus('Upload failed: ' + data.error, 'error');
-                }
-            }).catch(err => {
-                showStatus('Upload error: ' + err, 'error');
-            });
-        }
-        
-        function uploadBatch() {
-            const fileInput = document.getElementById('batch-file-input');
-            if (!fileInput.files.length) {
-                alert('Please select at least one image');
-                return;
-            }
-            
-            const formData = new FormData();
-            for (let i = 0; i < fileInput.files.length; i++) {
-                formData.append('files', fileInput.files[i]);
-            }
-            
-            showStatus(`Uploading ${fileInput.files.length} image(s)...`, 'active');
-            document.getElementById('batch-progress').style.display = 'block';
-            document.getElementById('batch-results-list').innerHTML = '';
-            
-            fetch(API_BASE + '/api/upload_batch', {
-                method: 'POST',
-                body: formData
-            }).then(r => r.json()).then(data => {
-                if (data.success) {
-                    showStatus(`Batch upload complete: ${data.count} file(s). Processing...`, 'active');
-                    document.getElementById('batch-count').textContent = data.count;
-                } else {
-                    showStatus('Batch upload failed: ' + data.error, 'error');
-                    document.getElementById('batch-progress').style.display = 'none';
-                }
-            }).catch(err => {
-                showStatus('Batch upload error: ' + err, 'error');
-                document.getElementById('batch-progress').style.display = 'none';
-            });
-        }
-        
-        function processUrl() {
-            const url = document.getElementById('url-input').value;
-            if (!url) {
-                alert('Please enter a URL');
-                return;
-            }
-            
-            fetch(API_BASE + '/api/process_url', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({url: url})
-            }).then(r => r.json()).then(data => {
-                if (data.success) showStatus('Processing URL...', 'active');
-            });
-        }
-        
-        function stopProcessing() {
-            fetch(API_BASE + '/api/stop', {method: 'POST'})
-                .then(r => r.json())
-                .then(data => showStatus('Processing stopped', 'success'));
-        }
-        
-        function resetCounts() {
-            fetch(API_BASE + '/api/reset_counts', {method: 'POST'});
-        }
-    </script>
+        <!-- Action buttons always visible -->
+        <div class="btn-group" style="padding:0 18px 16px;">
+          <button class="btn btn-danger" onclick="stopProcessing()">&#x23F9; Stop</button>
+          <button class="btn btn-ghost" onclick="resetCounts()">&#x21BA; Reset Counts</button>
+        </div>
+
+        <!-- Status Banner -->
+        <div class="status-banner" id="status-banner">
+          <span id="status-icon">&#x2139;</span>
+          <span id="status-message">Ready</span>
+        </div>
+      </div>
+
+    </div><!-- /left-panel -->
+
+    <!-- Right Column -->
+    <div class="right-panel">
+
+      <!-- Count Stats -->
+      <div class="stats-section">
+        <div class="stats-section-title">&#x1F4CA; Detection Summary</div>
+        <div class="stats-grid">
+          <div class="stat-card total">
+            <div class="stat-icon">&#x2211;</div>
+            <div class="stat-value" id="v-total">0</div>
+            <div class="stat-label">Total Counted</div>
+          </div>
+          <div class="stat-card fingerling">
+            <div class="stat-icon">&#x1F41F;</div>
+            <div class="stat-value" id="v-fingerling">0</div>
+            <div class="stat-label">Fingerling</div>
+          </div>
+          <div class="stat-card post">
+            <div class="stat-icon">&#x1F4CF;</div>
+            <div class="stat-value" id="v-post">0</div>
+            <div class="stat-label">Post-Fingerling</div>
+          </div>
+          <div class="stat-card juvenile">
+            <div class="stat-icon">&#x1F420;</div>
+            <div class="stat-value" id="v-juvenile">0</div>
+            <div class="stat-label">Juvenile</div>
+          </div>
+          <div class="stat-card unknown">
+            <div class="stat-icon">&#x2753;</div>
+            <div class="stat-value" id="v-unknown">0</div>
+            <div class="stat-label">Unknown</div>
+          </div>
+          <div class="stat-card active">
+            <div class="stat-icon">&#x1F441;</div>
+            <div class="stat-value" id="v-active">0</div>
+            <div class="stat-label">In Frame Now</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <!-- Distribution Chart -->
+      <div class="chart-section">
+        <div class="stats-section-title">&#x1F4C8; Class Distribution</div>
+        <div class="chart-wrap">
+          <canvas id="dist-chart"></canvas>
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <!-- Batch Results -->
+      <div class="batch-section">
+        <div class="stats-section-title">&#x1F5BC; Batch Results</div>
+        <div class="batch-result-list" id="batch-result-list">
+          <div style="font-size:0.78rem;color:var(--text-dim);text-align:center;padding:20px 0;">
+            No batch processed yet.<br />Use the Batch Images tab to upload multiple images.
+          </div>
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <!-- Instructions -->
+      <div class="instructions-section">
+        <div class="stats-section-title" style="margin-bottom:10px;">&#x1F4D6; Quick Reference</div>
+        <div class="instruction-item">
+          <span class="instruction-item-icon">1&#xFE0F;&#x20E3;</span>
+          <span>Pick a source: Camera, upload a file, or enter a URL.</span>
+        </div>
+        <div class="instruction-item">
+          <span class="instruction-item-icon">2&#xFE0F;&#x20E3;</span>
+          <span>Fish crossing the counting line are tracked &amp; tallied.</span>
+        </div>
+        <div class="instruction-item">
+          <span class="instruction-item-icon">3&#xFE0F;&#x20E3;</span>
+          <span>Use the zoom slider to magnify distant juveniles and verify size class.</span>
+        </div>
+        <div class="instruction-item">
+          <span class="instruction-item-icon">4&#xFE0F;&#x20E3;</span>
+          <span>Batch mode processes multiple images at once with per-image summaries.</span>
+        </div>
+        <div class="instruction-item">
+          <span class="instruction-item-icon">5&#xFE0F;&#x20E3;</span>
+          <span>Hit Reset Counts to start a new counting session.</span>
+        </div>
+      </div>
+
+    </div><!-- /right-panel -->
+  </div><!-- /main-content -->
+
+  <!-- Footer -->
+  <footer class="app-footer">
+    <span>AquaCount v1.0.0 — Catfish Fingerling Intelligence System</span>
+    <div class="footer-build">
+      <span>&#x25CF; Backend: <a id="footer-api-url" href="#" target="_blank">API</a></span>
+      <span>&#x25CB; Model: ONNX / YOLO</span>
+    </div>
+  </footer>
+
+</div><!-- /app-shell -->
+
+<script>
+// ─── Config ────────────────────────────────────────────────────────────────
+const urlParams = new URLSearchParams(window.location.search);
+const API_BASE = urlParams.get('backend') ||
+  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+    ? 'http://localhost:5000'
+    : 'https://your-render-backend.onrender.com');
+
+document.getElementById('footer-api-url').href = API_BASE;
+document.getElementById('footer-api-url').textContent = API_BASE.replace('https://', '').split('/')[0];
+
+// ─── Socket.IO ─────────────────────────────────────────────────────────────
+const socket = io(API_BASE, {
+  transports: ['polling'],
+  upgrade: false,
+  reconnectionDelay: 2000,
+  reconnectionAttempts: Infinity,
+});
+
+// ─── State ─────────────────────────────────────────────────────────────────
+let isProcessing = false;
+let currentZoom = 1;
+
+// ─── Chart ─────────────────────────────────────────────────────────────────
+const chartCtx = document.getElementById('dist-chart').getContext('2d');
+const distChart = new Chart(chartCtx, {
+  type: 'bar',
+  data: {
+    labels: ['Fingerling', 'Post-Fingerling', 'Juvenile', 'Unknown'],
+    datasets: [{
+      data: [0, 0, 0, 0],
+      backgroundColor: ['#00ff88cc','#ffb347cc','#fb923ccc','#6b7a9977'],
+      borderColor:     ['#00ff88','#ffb347','#fb923c','#6b7a99'],
+      borderWidth: 1,
+      borderRadius: 5,
+    }]
+  },
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+    scales: {
+      y: {
+        beginAtZero: true,
+        ticks: {
+          color: '#6b7a99',
+          font: { size: 10, family: "'JetBrains Mono', monospace" },
+          precision: 0,
+        },
+        grid: { color: 'rgba(255,255,255,0.05)' }
+      },
+      x: {
+        ticks: { color: '#6b7a99', font: { size: 9 } },
+        grid: { display: false }
+      }
+    }
+  }
+});
+
+function updateChart(counts) {
+  distChart.data.datasets[0].data = [
+    counts.fingerling     || 0,
+    counts.post_fingerling || 0,
+    counts.juvenile       || 0,
+    counts.unknown        || 0,
+  ];
+  distChart.update('none');
+}
+
+// ─── Socket Events ──────────────────────────────────────────────────────────
+socket.on('connect', () => {
+  const badge = document.getElementById('conn-badge');
+  badge.classList.remove('disconnected');
+  document.getElementById('conn-label').textContent = 'Connected';
+});
+
+socket.on('disconnect', () => {
+  const badge = document.getElementById('conn-badge');
+  badge.classList.add('disconnected');
+  document.getElementById('conn-label').textContent = 'Disconnected';
+  setVideoActive(false);
+});
+
+socket.on('update', (data) => {
+  const c = data.counts || {};
+  setStatVal('v-total',      c.total            || 0);
+  setStatVal('v-fingerling', c.fingerling        || 0);
+  setStatVal('v-post',       c.post_fingerling   || 0);
+  setStatVal('v-juvenile',   c.juvenile          || 0);
+  setStatVal('v-unknown',    c.unknown           || 0);
+  setStatVal('v-active',     data.active_tracks  || 0);
+
+  document.getElementById('s-frame').textContent  = data.frame_number ?? '—';
+  document.getElementById('s-fps').textContent    = data.fps != null ? data.fps.toFixed(1) : '—';
+  document.getElementById('s-source').textContent = data.source_type  || '—';
+  document.getElementById('s-time').textContent   = new Date().toLocaleTimeString();
+  document.getElementById('timestamp').textContent = new Date().toLocaleTimeString();
+
+  document.getElementById('live-badge').classList.toggle('active', !!data.is_live);
+  updateChart(c);
+});
+
+socket.on('processing_started', (data) => {
+  isProcessing = true;
+  const t = data.type || '';
+  if (['camera','upload','url'].includes(t)) setVideoActive(true);
+  showStatus('Processing started — ' + (data.source || 'source'), 'info');
+});
+socket.on('processing_completed', () => {
+  isProcessing = false;
+  setVideoActive(false);
+  showStatus('Processing complete.', 'success');
+});
+socket.on('processing_error', (data) => {
+  isProcessing = false;
+  setVideoActive(false);
+  showStatus('Error: ' + (data.error || 'unknown'), 'error');
+});
+socket.on('counts_reset', () => {
+  ['v-total','v-fingerling','v-post','v-juvenile','v-unknown','v-active'].forEach(id => {
+    document.getElementById(id).textContent = '0';
+  });
+  updateChart({});
+  setVideoActive(false);
+});
+socket.on('batch_results', renderBatchResults);
+socket.on('batch_csv_saved', (d) => showStatus('CSV saved: ' + d.csv_path, 'success'));
+
+// ─── Stat Helpers ───────────────────────────────────────────────────────────
+function setStatVal(id, val) {
+  const el = document.getElementById(id);
+  if (el) {
+    const prev = parseInt(el.textContent, 10);
+    el.textContent = val;
+    if (val !== prev && val > 0) {
+      el.classList.remove('count-flash');
+      void el.offsetWidth; // reflow
+      el.classList.add('count-flash');
+    }
+  }
+}
+
+// ─── Video Feed ─────────────────────────────────────────────────────────────
+function setVideoActive(active) {
+  const img = document.getElementById('video-feed');
+  const placeholder = document.getElementById('video-placeholder');
+  if (active) {
+    img.src = API_BASE + '/video_feed?ts=' + Date.now();
+    img.style.display = 'block';
+    placeholder.style.display = 'none';
+  } else {
+    img.removeAttribute('src');
+    img.style.display = 'none';
+    placeholder.style.display = 'flex';
+    document.getElementById('live-badge').classList.remove('active');
+  }
+}
+
+// ─── Zoom ────────────────────────────────────────────────────────────────────
+const zoomSlider = document.getElementById('zoom-slider');
+zoomSlider.addEventListener('input', () => {
+  applyZoom(parseFloat(zoomSlider.value));
+});
+
+function applyZoom(level) {
+  currentZoom = level;
+  const img = document.getElementById('video-feed');
+  img.style.transform = level === 1 ? 'none' : `scale(${level})`;
+  document.getElementById('zoom-val').textContent = level.toFixed(1) + '×';
+  document.querySelectorAll('.zoom-preset-btn').forEach(b => {
+    b.classList.toggle('active', parseFloat(b.textContent) === level);
+  });
+}
+
+function setZoom(level) {
+  zoomSlider.value = level;
+  applyZoom(level);
+}
+
+// ─── Tabs ────────────────────────────────────────────────────────────────────
+function switchTab(btn) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+}
+
+// ─── Controls ────────────────────────────────────────────────────────────────
+function startCamera() {
+  const idx = parseInt(document.getElementById('camera-index').value) || 0;
+  fetch(API_BASE + '/api/start_camera', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({camera_index: idx})
+  }).then(r => r.json()).then(d => {
+    if (d.success) showStatus('Starting camera ' + idx + '…', 'info');
+    else showStatus(d.error || 'Failed to start camera.', 'error');
+  }).catch(e => showStatus('Network error: ' + e, 'error'));
+}
+
+function uploadFile() {
+  const file = document.getElementById('file-input').files[0];
+  if (!file) { showStatus('Please select a file.', 'error'); return; }
+  const form = new FormData();
+  form.append('file', file);
+  showStatus('Uploading ' + file.name + '…', 'info');
+  fetch(API_BASE + '/api/upload', { method:'POST', body: form })
+    .then(r => r.json())
+    .then(d => {
+      if (d.success) showStatus('Uploaded. Processing…', 'info');
+      else showStatus(d.error || 'Upload failed.', 'error');
+    })
+    .catch(e => showStatus('Upload error: ' + e, 'error'));
+}
+
+function uploadBatch() {
+  const files = document.getElementById('batch-file-input').files;
+  if (!files.length) { showStatus('Select at least one image.', 'error'); return; }
+  const form = new FormData();
+  for (const f of files) form.append('files', f);
+  showStatus('Uploading ' + files.length + ' image(s)…', 'info');
+  document.getElementById('batch-progress').style.display = 'block';
+  document.getElementById('batch-result-list').innerHTML = '<div style="font-size:0.78rem;color:var(--text-dim);text-align:center;padding:16px 0;">Analysing…</div>';
+  fetch(API_BASE + '/api/upload_batch', { method:'POST', body: form })
+    .then(r => r.json())
+    .then(d => {
+      if (d.success) {
+        document.getElementById('batch-count').textContent = d.count;
+        showStatus('Batch uploaded (' + d.count + ' files). Analysing…', 'info');
+      } else {
+        showStatus(d.error || 'Batch upload failed.', 'error');
+        document.getElementById('batch-progress').style.display = 'none';
+      }
+    })
+    .catch(e => {
+      showStatus('Batch error: ' + e, 'error');
+      document.getElementById('batch-progress').style.display = 'none';
+    });
+}
+
+function processUrl() {
+  const url = document.getElementById('url-input').value.trim();
+  if (!url) { showStatus('Enter a URL.', 'error'); return; }
+  fetch(API_BASE + '/api/process_url', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({url})
+  }).then(r => r.json()).then(d => {
+    if (d.success) showStatus('Processing URL…', 'info');
+    else showStatus(d.error || 'Failed.', 'error');
+  }).catch(e => showStatus('Error: ' + e, 'error'));
+}
+
+function stopProcessing() {
+  fetch(API_BASE + '/api/stop', {method:'POST'})
+    .then(r => r.json())
+    .then(() => showStatus('Stopped.', 'success'))
+    .catch(e => showStatus('Error: ' + e, 'error'));
+}
+
+function resetCounts() {
+  fetch(API_BASE + '/api/reset_counts', {method:'POST'})
+    .catch(e => showStatus('Reset error: ' + e, 'error'));
+}
+
+// ─── Status Banner ────────────────────────────────────────────────────────────
+function showStatus(msg, type) {
+  const el = document.getElementById('status-banner');
+  const msgEl = document.getElementById('status-message');
+  const iconEl = document.getElementById('status-icon');
+  el.className = 'status-banner ' + type;
+  msgEl.textContent = msg;
+  iconEl.textContent = type === 'info' ? '⏳' : type === 'success' ? '✔' : '⚠';
+}
+
+// ─── Batch Results Renderer ───────────────────────────────────────────────────
+function renderBatchResults(data) {
+  const list = document.getElementById('batch-result-list');
+  let html = '';
+
+  // Totals
+  const bt = data.batch_totals || {};
+  html += `<div class="batch-totals-box">
+    <div class="batch-totals-title">&#x1F4CA; Batch Totals</div>
+    <div class="batch-totals-grid">
+      <span style="color:var(--text-dim)">Total</span>
+      <span style="color:var(--accent);font-weight:700">${bt.total||0}</span>
+      <span style="color:var(--text-dim)">Fingerling</span>
+      <span style="color:var(--success);font-weight:700">${bt.fingerling||0}</span>
+      <span style="color:var(--text-dim)">Post-Fingerling</span>
+      <span style="color:var(--warning);font-weight:700">${bt.post_fingerling||0}</span>
+      <span style="color:var(--text-dim)">Juvenile</span>
+      <span style="color:#fb923c;font-weight:700">${bt.juvenile||0}</span>
+      <span style="color:var(--text-dim)">Unknown</span>
+      <span style="color:var(--text-muted);font-weight:700">${bt.unknown||0}</span>
+    </div>
+  </div>`;
+
+  (data.results || []).forEach(r => {
+    const ok = r.status === 'success';
+    html += `<div class="batch-result-item ${ok ? 'success' : 'error'}">
+      <div class="batch-result-name ${ok ? 'success' : 'error'}">${ok ? '&#x2713;' : '&#x2717;'} ${r.filename}</div>`;
+    if (ok) {
+      if (r.annotated_image) {
+        html += `<img class="batch-result-img" src="data:image/jpeg;base64,${r.annotated_image}" alt="${r.filename}" />`;
+      }
+      const c = r.counts || {};
+      html += `<div class="batch-counts-grid">
+        <span>Total</span><span style="color:var(--accent);font-weight:700">${c.total||0}</span>
+        <span>Fingerling</span><span style="color:var(--success);font-weight:700">${c.fingerling||0}</span>
+        <span>Post-Fingerling</span><span style="color:var(--warning);font-weight:700">${c.post_fingerling||0}</span>
+        <span>Juvenile</span><span style="color:#fb923c;font-weight:700">${c.juvenile||0}</span>
+        <span>Unknown</span><span style="color:var(--text-muted);font-weight:700">${c.unknown||0}</span>
+      </div>`;
+      if (r.label_summary) {
+        html += `<div class="batch-summary-text">${r.label_summary}</div>`;
+      }
+    } else {
+      html += `<div style="color:var(--danger);font-size:0.75rem;">${r.error || 'Processing failed.'}</div>`;
+    }
+    html += `</div>`;
+  });
+
+  list.innerHTML = html;
+  showStatus('Batch complete — ' + (data.total_files || 0) + ' file(s) analysed.', 'success');
+}
+
+// ─── Theme Toggle ─────────────────────────────────────────────────────────────
+function toggleTheme() {
+  const html = document.documentElement;
+  const cur = html.getAttribute('data-theme');
+  html.setAttribute('data-theme', cur === 'dark' ? 'light' : 'dark');
+  document.getElementById('theme-toggle').textContent = cur === 'dark' ? '☀' : '☾';
+}
+
+// ─── Clock ────────────────────────────────────────────────────────────────────
+setInterval(() => {
+  document.getElementById('s-time').textContent = new Date().toLocaleTimeString();
+}, 1000);
+</script>
 </body>
 </html>

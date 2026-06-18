@@ -1,0 +1,40 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Production Backend Dependencies — Render Free Tier
+# RAM budget: ~512 MB  |  CPU: 0.1 vCPU (shared)
+#
+# Key strategy: ONNX Runtime replaces PyTorch (~1.8 GB → ~150 MB)
+# Convert your .pt model locally with scripts/convert_to_onnx.py, then
+# commit only the .onnx file to the repo (or host it on cloud storage).
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Inference (CPU-optimised, no PyTorch / CUDA) ─────────────────────────────
+onnxruntime>=1.16.3
+
+# ── Computer Vision ───────────────────────────────────────────────────────────
+opencv-python-headless>=4.8.0
+numpy>=1.24.0
+Pillow>=10.0.0
+
+# ── Tracking (pure NumPy/SciPy — no GPU) ─────────────────────────────────────
+scipy>=1.11.0
+filterpy>=1.4.5
+
+# ── Web Server ────────────────────────────────────────────────────────────────
+flask>=3.0.0
+flask-cors>=4.0.0
+flask-socketio>=5.3.0
+python-socketio>=5.9.0
+# Gunicorn + eventlet for async Socket.IO on Render
+gunicorn>=21.2.0
+eventlet>=0.35.1
+
+# ── Utilities ─────────────────────────────────────────────────────────────────
+pyyaml>=6.0.0
+requests>=2.31.0
+tqdm>=4.66.0
+
+# ── Data / Logging ───────────────────────────────────────────────────────────
+pandas>=2.0.0
+
+# ── URL / Stream Support ──────────────────────────────────────────────────────
+yt-dlp>=2024.1.0

@@ -1,0 +1,38 @@
+services:
+  - type: web
+    name: aquacount-backend
+    runtime: python
+    plan: free
+    region: oregon
+
+    # Install production-only dependencies (no PyTorch)
+    buildCommand: pip install -r requirements-prod.txt
+
+    # Gunicorn with eventlet worker for Socket.IO async support
+    # --timeout 120  avoids Render's 30-s idle kill during video processing
+    # --workers 1    keeps RAM inside the free-tier 512 MB envelope
+    startCommand: >
+      gunicorn
+      --worker-class eventlet
+      --workers 1
+      --bind 0.0.0.0:$PORT
+      --timeout 120
+      --keep-alive 5
+      --log-level info
+      "src.streaming.wsgi:app"
+
+    healthCheckPath: /api/status
+
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11"
+      - key: MODEL_PATH
+        value: models/best.onnx
+      - key: CONFIDENCE_THRESHOLD
+        value: "0.25"
+      - key: PORT
+        value: "10000"
+      # Set RENDER_BACKEND_URL to your Render public URL so the frontend
+      # knows where to connect (used as ?backend= query param):
+      # - key: RENDER_BACKEND_URL
+      #   value: https://aquacount-backend.onrender.com
