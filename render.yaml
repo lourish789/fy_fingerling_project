@@ -24,8 +24,6 @@ services:
     healthCheckPath: /api/status
 
     envVars:
-      - key: PYTHON_VERSION
-        value: "3.11"
       - key: MODEL_PATH
         value: models/best.onnx
       - key: CONFIDENCE_THRESHOLD

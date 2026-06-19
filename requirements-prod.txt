@@ -25,7 +25,8 @@ flask-cors>=4.0.0
 flask-socketio>=5.3.0
 python-socketio>=5.9.0
 # Gunicorn + eventlet for async Socket.IO on Render
-gunicorn>=21.2.0
+# [eventlet] extra is required since Gunicorn 22 — worker is no longer bundled
+gunicorn[eventlet]>=22.0.0
 eventlet>=0.35.1
 
 # ── Utilities ─────────────────────────────────────────────────────────────────
