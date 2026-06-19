@@ -34,5 +34,5 @@ services:
         value: "10000"
       # Set RENDER_BACKEND_URL to your Render public URL so the frontend
       # knows where to connect (used as ?backend= query param):
-       - key: RENDER_BACKEND_URL
-         value: https://aquacount-backend.onrender.com
+      - key: RENDER_BACKEND_URL
+        value: https://aquacount-backend.onrender.com
