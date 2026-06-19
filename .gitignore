@@ -57,9 +57,10 @@ output/*.avi
 output/*.mov
 output/*.mkv
 output/*.csv
+output/**/*.csv
 output/smoke_*
 output/sample_result.*
-# Preserve directory placeholder
+# Preserve directory placeholders
 !output/.gitkeep
 !output/batch_summaries/.gitkeep
 
