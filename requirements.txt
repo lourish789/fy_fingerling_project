@@ -26,6 +26,7 @@ lap>=0.4.0  # Linear assignment problem solver
 tqdm>=4.66.0
 pyyaml>=6.0.0
 requests>=2.31.0
+eventlet
 
 # Data handling
 pandas>=2.0.0
