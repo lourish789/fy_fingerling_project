@@ -5,142 +5,262 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>AquaCount — Catfish Fingerling Intelligence System</title>
 
-  <!-- External dependencies -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+
   <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
 
   <style>
-    /* ─── CSS Custom Properties ─────────────────────────────────────── */
+    /* ════════════════════════════════════════════════════════════════
+       DESIGN TOKENS
+       ════════════════════════════════════════════════════════════════ */
     :root {
-      --bg-base:     #0a0f1e;
-      --bg-surface:  #0e1628;
-      --bg-card:     rgba(255,255,255,0.04);
-      --bg-card-hover: rgba(255,255,255,0.07);
-      --border:      rgba(255,255,255,0.08);
-      --border-accent: rgba(0,212,255,0.35);
-      --accent:      #00d4ff;
-      --accent-dim:  rgba(0,212,255,0.15);
-      --success:     #00ff88;
-      --warning:     #ffb347;
-      --danger:      #ff4d6d;
-      --purple:      #a855f7;
-      --text-primary: #e2e8f0;
-      --text-muted:  #6b7a99;
-      --text-dim:    #3d4f6e;
-      --shadow:      0 8px 32px rgba(0,0,0,0.4);
-      --radius:      12px;
-      --radius-sm:   8px;
-      --font:        'Inter', 'Segoe UI', system-ui, sans-serif;
-      --mono:        'JetBrains Mono', 'Fira Code', monospace;
-      --transition:  0.2s ease;
-    }
-    [data-theme="light"] {
-      --bg-base:    #f0f4f8;
-      --bg-surface: #ffffff;
-      --bg-card:    rgba(0,0,0,0.03);
-      --bg-card-hover: rgba(0,0,0,0.06);
-      --border:     rgba(0,0,0,0.08);
-      --border-accent: rgba(0,150,200,0.4);
-      --accent:     #0089b0;
-      --accent-dim: rgba(0,137,176,0.12);
-      --text-primary: #1a202c;
-      --text-muted:  #718096;
-      --text-dim:    #a0aec0;
-      --shadow:      0 4px 20px rgba(0,0,0,0.1);
+      --topbar-h:  68px;
+      --sidebar-w: 380px;
+      --r:         14px;
+      --r-sm:       9px;
+      --r-xs:       5px;
+      --ease:       0.2s cubic-bezier(.4,0,.2,1);
+      --font:      'Inter', 'Segoe UI', system-ui, sans-serif;
+      --mono:      'JetBrains Mono', 'Fira Code', monospace;
     }
 
-    /* ─── Reset & Base ──────────────────────────────────────────────── */
+    /* ── DARK ── */
+    [data-theme="dark"] {
+      --bg:        #0c1120;
+      --surface:   #111827;
+      --card:      #18223a;
+      --card-h:    #1e2a45;
+      --input-bg:  #0d1628;
+
+      --border:    rgba(255,255,255,0.07);
+      --b-accent:  rgba(6,182,212,0.38);
+
+      --accent:    #06b6d4;
+      --a-dim:     rgba(6,182,212,0.12);
+      --a-glow:    rgba(6,182,212,0.28);
+      --green:     #22c55e;
+      --amber:     #f59e0b;
+      --orange:    #f97316;
+      --danger:    #ef4444;
+      --violet:    #a78bfa;
+
+      --t1:        #f1f5f9;
+      --t2:        #94a3b8;
+      --t3:        #475569;
+
+      /* legacy aliases kept for renderBatchResults inline styles */
+      --text-dim:  #475569;
+      --text-muted:#94a3b8;
+      --warning:   #f59e0b;
+      --success:   #22c55e;
+      --danger:    #ef4444;
+
+      --shadow:    0 4px 28px rgba(0,0,0,0.55);
+      --sh-card:   0 2px 12px rgba(0,0,0,0.35);
+      --grid:      rgba(6,182,212,0.04);
+      --sym-c:     rgba(6,182,212,0.028);
+    }
+
+    /* ── LIGHT ── */
+    [data-theme="light"] {
+      --bg:        #f0f4f8;
+      --surface:   #ffffff;
+      --card:      #ffffff;
+      --card-h:    #f8fafc;
+      --input-bg:  #f1f5f9;
+
+      --border:    rgba(0,0,0,0.08);
+      --b-accent:  rgba(2,132,199,0.38);
+
+      --accent:    #0284c7;
+      --a-dim:     rgba(2,132,199,0.1);
+      --a-glow:    rgba(2,132,199,0.22);
+      --green:     #16a34a;
+      --amber:     #d97706;
+      --orange:    #ea580c;
+      --danger:    #dc2626;
+      --violet:    #7c3aed;
+
+      --t1:        #0f172a;
+      --t2:        #475569;
+      --t3:        #94a3b8;
+
+      --text-dim:  #94a3b8;
+      --text-muted:#475569;
+      --warning:   #d97706;
+      --success:   #16a34a;
+
+      --shadow:    0 4px 28px rgba(0,0,0,0.08);
+      --sh-card:   0 1px 6px rgba(0,0,0,0.06);
+      --grid:      rgba(2,132,199,0.04);
+      --sym-c:     rgba(2,132,199,0.045);
+    }
+
+    /* ════════════════════════════════════════════════════════════════
+       RESET
+       ════════════════════════════════════════════════════════════════ */
     *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
-    html { font-size:15px; }
+    html { font-size: 15px; }
     body {
       font-family: var(--font);
-      background: var(--bg-base);
-      color: var(--text-primary);
+      background: var(--bg);
+      color: var(--t1);
       min-height: 100vh;
       line-height: 1.5;
       -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
     }
     a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
 
-    /* ─── Scrollbar ─────────────────────────────────────────────────── */
-    ::-webkit-scrollbar { width:6px; height:6px; }
-    ::-webkit-scrollbar-track { background: transparent; }
-    ::-webkit-scrollbar-thumb { background: var(--text-dim); border-radius:3px; }
+    /* ════════════════════════════════════════════════════════════════
+       ENGINEERING BACKGROUND
+       ════════════════════════════════════════════════════════════════ */
+    /* Subtle technical grid */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(var(--grid) 1px, transparent 1px),
+        linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+      background-size: 52px 52px;
+      pointer-events: none;
+      z-index: 0;
+    }
 
-    /* ─── Layout ────────────────────────────────────────────────────── */
+    /* Engineering symbols watermark */
+    .eng-bg {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 0;
+      overflow: hidden;
+    }
+    .eng-bg span {
+      position: absolute;
+      color: var(--sym-c);
+      user-select: none;
+      font-family: var(--mono);
+      font-weight: 700;
+      line-height: 1;
+      filter: blur(0.5px);
+    }
+    .eng-bg span:nth-child(1)  { font-size:9rem;  top:5%;   left:1%;   }
+    .eng-bg span:nth-child(2)  { font-size:6rem;  top:12%;  right:2%;  }
+    .eng-bg span:nth-child(3)  { font-size:8rem;  top:38%;  left:0%;   }
+    .eng-bg span:nth-child(4)  { font-size:11rem; top:58%;  right:1%;  }
+    .eng-bg span:nth-child(5)  { font-size:7rem;  bottom:8%;left:3%;   }
+    .eng-bg span:nth-child(6)  { font-size:8rem;  bottom:6%;right:4%;  }
+    .eng-bg span:nth-child(7)  { font-size:5rem;  top:28%;  left:44%;  }
+    .eng-bg span:nth-child(8)  { font-size:6rem;  top:4%;   left:52%;  }
+    .eng-bg span:nth-child(9)  { font-size:7rem;  bottom:18%;left:32%; }
+    .eng-bg span:nth-child(10) { font-size:5rem;  top:52%;  right:30%; }
+    .eng-bg span:nth-child(11) { font-size:4rem;  top:80%;  left:22%;  }
+    .eng-bg span:nth-child(12) { font-size:6rem;  top:22%;  right:18%; }
+
+    /* ════════════════════════════════════════════════════════════════
+       APP SHELL
+       ════════════════════════════════════════════════════════════════ */
     .app-shell {
+      position: relative;
+      z-index: 1;
       display: flex;
       flex-direction: column;
       min-height: 100vh;
     }
+
+    /* ════════════════════════════════════════════════════════════════
+       TOPBAR
+       ════════════════════════════════════════════════════════════════ */
     .topbar {
+      height: var(--topbar-h);
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      box-shadow: var(--shadow);
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 0 24px;
-      height: 60px;
-      background: var(--bg-surface);
-      border-bottom: 1px solid var(--border);
+      padding: 0 28px;
       position: sticky;
       top: 0;
-      z-index: 100;
-      box-shadow: var(--shadow);
+      z-index: 200;
     }
-    .topbar-left {
-      display: flex;
-      align-items: center;
-      gap: 14px;
-    }
-    .logo-icon {
-      width: 36px;
-      height: 36px;
-      background: linear-gradient(135deg, var(--accent), #0050ff);
-      border-radius: 10px;
+
+    /* Logo */
+    .logo { display: flex; align-items: center; gap: 15px; }
+
+    .logo-badge {
+      width: 46px;
+      height: 46px;
+      border-radius: 13px;
+      background: linear-gradient(140deg, #0ea5e9 0%, #0050c8 100%);
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 18px;
+      box-shadow: 0 0 22px var(--a-glow), 0 2px 8px rgba(0,0,0,0.3);
       flex-shrink: 0;
+      position: relative;
+      overflow: hidden;
     }
-    .logo-text {
-      display: flex;
-      flex-direction: column;
-      line-height: 1.1;
+    .logo-badge::after {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 50%;
+      background: rgba(255,255,255,0.18);
+      border-radius: 13px 13px 0 0;
     }
-    .logo-title {
-      font-size: 1.05rem;
-      font-weight: 700;
-      letter-spacing: -0.02em;
-      color: var(--text-primary);
+    .logo-badge svg {
+      width: 28px;
+      height: 28px;
+      fill: #fff;
+      position: relative;
+      z-index: 1;
+      filter: drop-shadow(0 1px 3px rgba(0,0,0,0.3));
     }
+
+    .logo-text { display: flex; flex-direction: column; gap: 2px; }
+    .logo-name {
+      font-size: 1.2rem;
+      font-weight: 800;
+      letter-spacing: -0.04em;
+      line-height: 1;
+      color: var(--t1);
+    }
+    .logo-name em { font-style: normal; color: var(--accent); }
     .logo-sub {
-      font-size: 0.7rem;
-      color: var(--text-muted);
+      font-size: 0.62rem;
       font-family: var(--mono);
-      letter-spacing: 0.04em;
+      font-weight: 500;
+      color: var(--t3);
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      line-height: 1;
     }
-    .topbar-right {
-      display: flex;
-      align-items: center;
-      gap: 14px;
-    }
+
+    /* Right nav */
+    .topbar-right { display: flex; align-items: center; gap: 12px; }
+
     .conn-badge {
       display: flex;
       align-items: center;
-      gap: 6px;
-      padding: 4px 12px;
-      border-radius: 20px;
-      font-size: 0.78rem;
+      gap: 8px;
+      padding: 6px 16px;
+      border-radius: 100px;
+      border: 1px solid var(--b-accent);
+      background: var(--a-dim);
+      font-size: 0.75rem;
       font-weight: 600;
       font-family: var(--mono);
-      background: var(--accent-dim);
-      border: 1px solid var(--border-accent);
       color: var(--accent);
-      transition: var(--transition);
+      transition: var(--ease);
     }
     .conn-badge.disconnected {
-      background: rgba(255,77,109,0.12);
-      border-color: rgba(255,77,109,0.3);
+      border-color: rgba(239,68,68,0.4);
+      background: rgba(239,68,68,0.1);
       color: var(--danger);
     }
     .conn-dot {
@@ -148,90 +268,126 @@
       height: 7px;
       border-radius: 50%;
       background: currentColor;
-      animation: ping 1.5s ease-in-out infinite;
     }
-    .conn-badge.disconnected .conn-dot { animation: none; }
-    @keyframes ping {
-      0%, 100% { opacity: 1; transform: scale(1); }
-      50% { opacity: 0.5; transform: scale(0.8); }
+    .conn-badge:not(.disconnected) .conn-dot {
+      animation: blink 1.8s ease-in-out infinite;
     }
+    @keyframes blink {
+      0%,100% { opacity:1; transform:scale(1); }
+      50%      { opacity:0.5; transform:scale(0.75); }
+    }
+
     .icon-btn {
-      width: 36px;
-      height: 36px;
-      border-radius: var(--radius-sm);
-      background: var(--bg-card);
+      width: 40px;
+      height: 40px;
+      border-radius: var(--r-sm);
       border: 1px solid var(--border);
-      color: var(--text-muted);
+      background: var(--card);
+      color: var(--t2);
       cursor: pointer;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 1rem;
-      transition: var(--transition);
+      font-size: 1.05rem;
+      transition: var(--ease);
     }
-    .icon-btn:hover { background: var(--bg-card-hover); color: var(--text-primary); }
+    .icon-btn:hover {
+      border-color: var(--b-accent);
+      background: var(--a-dim);
+      color: var(--accent);
+    }
 
-    /* ─── Main Content Grid ──────────────────────────────────────────── */
+    /* ════════════════════════════════════════════════════════════════
+       LAYOUT
+       ════════════════════════════════════════════════════════════════ */
     .main-content {
       display: grid;
-      grid-template-columns: 1fr 360px;
-      gap: 0;
+      grid-template-columns: 1fr var(--sidebar-w);
       flex: 1;
-      min-height: 0;
     }
     @media (max-width: 1100px) {
       .main-content { grid-template-columns: 1fr; }
+      .right-panel { border-left: none; border-top: 1px solid var(--border); }
     }
 
-    /* ─── Left Panel ─────────────────────────────────────────────────── */
     .left-panel {
-      padding: 20px;
+      padding: 24px;
       display: flex;
       flex-direction: column;
-      gap: 16px;
+      gap: 20px;
       overflow-y: auto;
     }
 
-    /* ─── Card ───────────────────────────────────────────────────────── */
+    /* ════════════════════════════════════════════════════════════════
+       CARD
+       ════════════════════════════════════════════════════════════════ */
     .card {
-      background: var(--bg-card);
+      background: var(--card);
       border: 1px solid var(--border);
-      border-radius: var(--radius);
+      border-radius: var(--r);
+      box-shadow: var(--sh-card);
       overflow: hidden;
-      transition: var(--transition);
+      transition: border-color var(--ease);
     }
     .card-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 14px 18px;
+      padding: 13px 20px;
       border-bottom: 1px solid var(--border);
     }
     .card-title {
-      font-size: 0.8rem;
-      font-weight: 700;
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-      color: var(--text-muted);
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 9px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--t2);
     }
-    .card-title-dot {
-      width: 6px;
-      height: 6px;
+    .card-pip {
+      width: 8px;
+      height: 8px;
       border-radius: 50%;
       background: var(--accent);
+      box-shadow: 0 0 7px var(--accent);
     }
-    .card-body { padding: 16px 18px; }
+    .card-body { padding: 18px 20px; }
 
-    /* ─── Video Feed ─────────────────────────────────────────────────── */
-    .video-card { }
+    /* ════════════════════════════════════════════════════════════════
+       VIDEO
+       ════════════════════════════════════════════════════════════════ */
     .video-wrapper {
       position: relative;
-      background: #000;
+      background: #06090f;
+      min-height: 280px;
       overflow: hidden;
-      cursor: crosshair;
+    }
+    .video-placeholder {
+      min-height: 300px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+    }
+    .vp-icon {
+      width: 72px;
+      height: 72px;
+      border-radius: 50%;
+      border: 2px dashed var(--t3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 2rem;
+      opacity: 0.35;
+    }
+    .vp-text {
+      font-size: 0.82rem;
+      color: var(--t3);
+      font-family: var(--mono);
+      letter-spacing: 0.03em;
     }
     .video-feed-img {
       display: block;
@@ -241,78 +397,68 @@
       object-fit: contain;
       transform-origin: center center;
       transition: transform 0.15s ease;
-      will-change: transform;
     }
-    .video-placeholder {
-      width: 100%;
-      height: 320px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 12px;
-      color: var(--text-dim);
-      background: #060c18;
-    }
-    .video-placeholder-icon { font-size: 48px; opacity: 0.3; }
-    .video-placeholder-text { font-size: 0.85rem; }
     .live-badge {
       position: absolute;
-      top: 12px;
-      left: 12px;
-      background: rgba(255,0,0,0.9);
+      top: 14px;
+      left: 14px;
+      background: rgba(239,68,68,0.9);
       color: #fff;
-      font-size: 0.7rem;
+      font-size: 0.66rem;
       font-weight: 800;
-      letter-spacing: 0.08em;
-      padding: 3px 9px;
-      border-radius: 4px;
+      font-family: var(--mono);
+      letter-spacing: 0.12em;
+      padding: 4px 10px;
+      border-radius: var(--r-xs);
       display: none;
     }
-    .live-badge.active { display: block; animation: livePulse 1s ease-in-out infinite; }
-    @keyframes livePulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.6; }
-    }
+    .live-badge.active { display:block; animation: livePulse 1.2s ease-in-out infinite; }
+    @keyframes livePulse { 0%,100%{opacity:1} 50%{opacity:0.6} }
+
     .video-status-bar {
       display: flex;
       align-items: center;
-      gap: 18px;
-      padding: 8px 14px;
-      background: rgba(0,0,0,0.5);
-      font-size: 0.72rem;
-      font-family: var(--mono);
-      color: var(--text-muted);
+      gap: 22px;
+      padding: 8px 16px;
+      background: rgba(0,0,0,0.55);
       border-top: 1px solid var(--border);
+      font-size: 0.68rem;
+      font-family: var(--mono);
       flex-wrap: wrap;
     }
+    [data-theme="light"] .video-status-bar { background: var(--input-bg); }
     .status-item { display: flex; align-items: center; gap: 5px; }
-    .status-label { color: var(--text-dim); }
-    .status-val { color: var(--text-muted); }
+    .status-label {
+      color: var(--t3);
+      text-transform: uppercase;
+      font-size: 0.62rem;
+      letter-spacing: 0.07em;
+    }
+    .status-val { color: var(--t2); font-weight: 500; }
 
-    /* ─── Zoom Controls ──────────────────────────────────────────────── */
+    /* ════════════════════════════════════════════════════════════════
+       ZOOM
+       ════════════════════════════════════════════════════════════════ */
     .zoom-controls {
       display: flex;
       align-items: center;
       gap: 12px;
-      padding: 10px 16px;
-      background: var(--bg-surface);
+      padding: 10px 18px;
+      background: var(--surface);
       border-top: 1px solid var(--border);
     }
     .zoom-label {
-      font-size: 0.72rem;
+      font-size: 0.68rem;
       font-family: var(--mono);
-      color: var(--text-muted);
+      color: var(--t3);
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
       white-space: nowrap;
-      display: flex;
-      align-items: center;
-      gap: 6px;
     }
     .zoom-slider {
       flex: 1;
       -webkit-appearance: none;
-      appearance: none;
-      height: 4px;
+      height: 3px;
       border-radius: 2px;
       background: var(--border);
       outline: none;
@@ -320,237 +466,288 @@
     }
     .zoom-slider::-webkit-slider-thumb {
       -webkit-appearance: none;
-      width: 14px;
-      height: 14px;
+      width: 16px;
+      height: 16px;
       border-radius: 50%;
       background: var(--accent);
       cursor: pointer;
-      box-shadow: 0 0 6px rgba(0,212,255,0.5);
+      box-shadow: 0 0 8px var(--a-glow);
+      border: 2px solid var(--surface);
     }
     .zoom-slider::-moz-range-thumb {
-      width: 14px;
-      height: 14px;
-      border: none;
-      border-radius: 50%;
-      background: var(--accent);
-      cursor: pointer;
-    }
-    .zoom-presets { display: flex; gap: 5px; }
-    .zoom-preset-btn {
-      padding: 3px 8px;
-      border-radius: 4px;
-      border: 1px solid var(--border);
-      background: var(--bg-card);
-      color: var(--text-muted);
-      font-size: 0.7rem;
-      font-family: var(--mono);
-      cursor: pointer;
-      transition: var(--transition);
-    }
-    .zoom-preset-btn:hover,
-    .zoom-preset-btn.active {
-      background: var(--accent-dim);
-      border-color: var(--border-accent);
-      color: var(--accent);
+      width: 14px; height: 14px;
+      border: none; border-radius: 50%;
+      background: var(--accent); cursor: pointer;
     }
     .zoom-val-display {
       font-size: 0.72rem;
       font-family: var(--mono);
+      font-weight: 600;
       color: var(--accent);
-      min-width: 36px;
+      min-width: 38px;
       text-align: right;
     }
+    .zoom-presets { display: flex; gap: 4px; }
+    .zoom-preset-btn {
+      padding: 3px 9px;
+      border-radius: var(--r-xs);
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--t3);
+      font-size: 0.68rem;
+      font-family: var(--mono);
+      cursor: pointer;
+      transition: var(--ease);
+    }
+    .zoom-preset-btn:hover, .zoom-preset-btn.active {
+      background: var(--a-dim);
+      border-color: var(--b-accent);
+      color: var(--accent);
+    }
 
-    /* ─── Tabs ───────────────────────────────────────────────────────── */
+    /* ════════════════════════════════════════════════════════════════
+       TABS
+       ════════════════════════════════════════════════════════════════ */
     .tab-list {
       display: flex;
       border-bottom: 1px solid var(--border);
       overflow-x: auto;
+      scrollbar-width: none;
     }
+    .tab-list::-webkit-scrollbar { display: none; }
     .tab-btn {
-      padding: 10px 18px;
+      padding: 12px 18px;
       font-size: 0.78rem;
       font-weight: 600;
-      color: var(--text-muted);
+      color: var(--t3);
       cursor: pointer;
       border: none;
       background: none;
       border-bottom: 2px solid transparent;
       white-space: nowrap;
-      transition: var(--transition);
+      transition: var(--ease);
+      font-family: var(--font);
+      display: flex;
+      align-items: center;
+      gap: 6px;
     }
-    .tab-btn:hover { color: var(--text-primary); }
+    .tab-btn:hover { color: var(--t2); }
     .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
-    .tab-pane { display: none; padding: 16px 18px; }
+    .tab-pane { display: none; padding: 18px 20px; }
     .tab-pane.active { display: block; }
 
-    /* ─── Form Elements ──────────────────────────────────────────────── */
-    .field { margin-bottom: 12px; }
+    /* ════════════════════════════════════════════════════════════════
+       FORM
+       ════════════════════════════════════════════════════════════════ */
+    .field { margin-bottom: 14px; }
     .field label {
       display: block;
-      font-size: 0.75rem;
-      color: var(--text-muted);
-      margin-bottom: 5px;
+      font-size: 0.74rem;
       font-weight: 600;
+      color: var(--t2);
+      margin-bottom: 6px;
+      letter-spacing: 0.01em;
     }
     .field input[type="text"],
     .field input[type="file"] {
       width: 100%;
-      padding: 8px 12px;
-      background: var(--bg-surface);
+      padding: 9px 13px;
+      background: var(--input-bg);
       border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-      color: var(--text-primary);
+      border-radius: var(--r-sm);
+      color: var(--t1);
       font-size: 0.85rem;
       font-family: var(--font);
-      transition: var(--transition);
+      transition: var(--ease);
       outline: none;
     }
-    .field input[type="text"]:focus,
-    .field input[type="file"]:focus {
-      border-color: var(--border-accent);
-      box-shadow: 0 0 0 3px rgba(0,212,255,0.08);
+    .field input[type="text"]::placeholder { color: var(--t3); }
+    .field input:focus {
+      border-color: var(--b-accent);
+      box-shadow: 0 0 0 3px var(--a-dim);
     }
-    .field input[type="file"] { cursor: pointer; padding: 7px 10px; }
-    .hint { font-size: 0.72rem; color: var(--text-dim); margin-top: 4px; }
+    .hint { font-size: 0.7rem; color: var(--t3); margin-top: 5px; line-height: 1.45; }
 
-    /* ─── Buttons ────────────────────────────────────────────────────── */
+    /* ════════════════════════════════════════════════════════════════
+       BUTTONS
+       ════════════════════════════════════════════════════════════════ */
     .btn {
       display: inline-flex;
       align-items: center;
       gap: 7px;
-      padding: 8px 16px;
-      border-radius: var(--radius-sm);
+      padding: 9px 18px;
+      border-radius: var(--r-sm);
       border: 1px solid transparent;
       font-size: 0.82rem;
       font-weight: 600;
       font-family: var(--font);
       cursor: pointer;
-      transition: var(--transition);
+      transition: var(--ease);
       white-space: nowrap;
     }
-    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
-    .btn-primary { background: var(--accent); color: #000; }
-    .btn-primary:hover:not(:disabled) { background: #00b8d9; }
-    .btn-success { background: var(--success); color: #000; }
-    .btn-success:hover:not(:disabled) { background: #00d970; }
-    .btn-danger { background: var(--danger); color: #fff; border-color: var(--danger); }
-    .btn-danger:hover:not(:disabled) { background: #ff2a50; }
-    .btn-ghost {
-      background: var(--bg-card);
-      border-color: var(--border);
-      color: var(--text-muted);
-    }
-    .btn-ghost:hover:not(:disabled) { background: var(--bg-card-hover); color: var(--text-primary); }
-    .btn-group { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+    .btn:disabled { opacity: 0.38; cursor: not-allowed; }
 
-    /* ─── Status Banner ──────────────────────────────────────────────── */
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+      box-shadow: 0 2px 14px var(--a-glow);
+    }
+    .btn-primary:hover:not(:disabled) {
+      filter: brightness(1.12);
+      transform: translateY(-1px);
+      box-shadow: 0 4px 20px var(--a-glow);
+    }
+    .btn-success {
+      background: var(--green);
+      color: #fff;
+      box-shadow: 0 2px 12px rgba(34,197,94,0.32);
+    }
+    .btn-success:hover:not(:disabled) { filter: brightness(1.1); transform: translateY(-1px); }
+
+    .btn-danger {
+      background: transparent;
+      color: var(--danger);
+      border-color: rgba(239,68,68,0.4);
+    }
+    .btn-danger:hover:not(:disabled) { background: rgba(239,68,68,0.1); }
+
+    .btn-ghost {
+      background: transparent;
+      border-color: var(--border);
+      color: var(--t2);
+    }
+    .btn-ghost:hover:not(:disabled) { background: var(--card-h); color: var(--t1); }
+
+    .btn-group { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 20px 18px; }
+
+    /* ════════════════════════════════════════════════════════════════
+       STATUS BANNER
+       ════════════════════════════════════════════════════════════════ */
     .status-banner {
       display: none;
       align-items: center;
-      gap: 10px;
+      gap: 9px;
       padding: 10px 14px;
-      border-radius: var(--radius-sm);
-      font-size: 0.8rem;
-      margin-top: 12px;
+      border-radius: var(--r-sm);
+      font-size: 0.79rem;
+      font-weight: 500;
+      margin: 0 20px 18px;
     }
-    .status-banner.info { display:flex; background:rgba(0,212,255,0.1); border:1px solid rgba(0,212,255,0.2); color:var(--accent); animation: statusPulse 2s ease-in-out infinite; }
-    .status-banner.success { display:flex; background:rgba(0,255,136,0.1); border:1px solid rgba(0,255,136,0.2); color:var(--success); }
-    .status-banner.error { display:flex; background:rgba(255,77,109,0.1); border:1px solid rgba(255,77,109,0.2); color:var(--danger); }
-    @keyframes statusPulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.7; }
-    }
+    .status-banner.info    { display:flex; background:rgba(6,182,212,0.1);   border:1px solid rgba(6,182,212,0.28);   color:var(--accent); }
+    .status-banner.success { display:flex; background:rgba(34,197,94,0.1);   border:1px solid rgba(34,197,94,0.28);   color:var(--green); }
+    .status-banner.error   { display:flex; background:rgba(239,68,68,0.1);   border:1px solid rgba(239,68,68,0.28);   color:var(--danger); }
 
-    /* ─── Right Panel ────────────────────────────────────────────────── */
+    /* ════════════════════════════════════════════════════════════════
+       RIGHT PANEL
+       ════════════════════════════════════════════════════════════════ */
     .right-panel {
-      background: var(--bg-surface);
+      background: var(--surface);
       border-left: 1px solid var(--border);
       overflow-y: auto;
       display: flex;
       flex-direction: column;
     }
 
-    /* ─── Stats Grid ─────────────────────────────────────────────────── */
-    .stats-section { padding: 18px; }
-    .stats-section-title {
-      font-size: 0.72rem;
+    /* Section heading */
+    .sec-head {
+      font-size: 0.68rem;
       font-weight: 700;
-      letter-spacing: 0.12em;
+      letter-spacing: 0.14em;
       text-transform: uppercase;
-      color: var(--text-dim);
-      margin-bottom: 14px;
+      color: var(--t3);
+      margin-bottom: 16px;
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 8px;
     }
+    .sec-head::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+    }
+
+    /* ════════════════════════════════════════════════════════════════
+       STATS
+       ════════════════════════════════════════════════════════════════ */
+    .stats-section { padding: 20px; }
+
     .stats-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 10px;
     }
+
     .stat-card {
-      background: var(--bg-card);
+      background: var(--card);
       border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 14px;
+      border-radius: var(--r-sm);
+      padding: 15px 14px 13px;
       position: relative;
       overflow: hidden;
-      transition: var(--transition);
+      transition: border-color var(--ease), background var(--ease);
+      cursor: default;
     }
+    .stat-card:hover { background: var(--card-h); }
+
+    /* colored top stripe */
     .stat-card::before {
       content: '';
       position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
+      top: 0; left: 0; right: 0;
       height: 2px;
-      background: var(--stat-color, var(--accent));
+      background: var(--sc, var(--accent));
     }
-    .stat-card:hover { background: var(--bg-card-hover); }
-    .stat-value {
-      font-size: 2rem;
+    /* faint watermark letter */
+    .stat-card::after {
+      content: var(--sw, '');
+      position: absolute;
+      bottom: 4px; right: 9px;
+      font-size: 1.8rem;
+      opacity: 0.08;
+      line-height: 1;
+      font-family: var(--mono);
+      font-weight: 700;
+      color: var(--sc, var(--accent));
+    }
+
+    .stat-val {
+      font-size: 2.4rem;
       font-weight: 800;
       font-family: var(--mono);
-      color: var(--stat-color, var(--accent));
+      color: var(--sc, var(--accent));
       line-height: 1;
-      margin-bottom: 4px;
-      transition: all 0.3s ease;
+      margin-bottom: 5px;
+      letter-spacing: -0.02em;
     }
-    .stat-label {
-      font-size: 0.7rem;
-      color: var(--text-muted);
+    .stat-lbl {
+      font-size: 0.66rem;
       font-weight: 600;
-      letter-spacing: 0.03em;
+      color: var(--t3);
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
     }
-    .stat-icon {
-      position: absolute;
-      top: 10px;
-      right: 12px;
-      font-size: 1.2rem;
-      opacity: 0.25;
-    }
-    .stat-card.total    { --stat-color: var(--accent); }
-    .stat-card.fingerling { --stat-color: var(--success); }
-    .stat-card.post     { --stat-color: var(--warning); }
-    .stat-card.juvenile { --stat-color: #fb923c; }
-    .stat-card.unknown  { --stat-color: var(--text-muted); }
-    .stat-card.active   { --stat-color: var(--purple); }
 
-    /* ─── Chart ──────────────────────────────────────────────────────── */
-    .chart-section {
-      padding: 0 18px 18px;
-      border-top: 1px solid var(--border);
-      margin-top: 4px;
-    }
-    .chart-section .stats-section-title { padding-top: 16px; }
-    .chart-wrap { height: 160px; position: relative; }
+    .s-total    { --sc: var(--accent);  --sw: 'Σ'; }
+    .s-finger   { --sc: var(--green);   --sw: '↑'; }
+    .s-post     { --sc: var(--amber);   --sw: '↗'; }
+    .s-juv      { --sc: var(--orange);  --sw: '→'; }
+    .s-unk      { --sc: var(--t2);      --sw: '?'; }
+    .s-active   { --sc: var(--violet);  --sw: '◉'; }
 
-    /* ─── Divider ────────────────────────────────────────────────────── */
-    .divider { height: 1px; background: var(--border); margin: 0 18px; }
+    /* ════════════════════════════════════════════════════════════════
+       CHART
+       ════════════════════════════════════════════════════════════════ */
+    .chart-section { padding: 0 20px 20px; border-top: 1px solid var(--border); }
+    .chart-section .sec-head { padding-top: 18px; margin-top: 0; }
+    .chart-wrap { height: 158px; }
 
-    /* ─── Batch Results ──────────────────────────────────────────────── */
-    .batch-section { padding: 18px; flex: 1; }
+    /* ════════════════════════════════════════════════════════════════
+       BATCH
+       ════════════════════════════════════════════════════════════════ */
+    .batch-section { padding: 0 20px 20px; border-top: 1px solid var(--border); flex: 1; }
+    .batch-section .sec-head { padding-top: 18px; margin-top: 0; }
+
     .batch-result-list {
       max-height: 340px;
       overflow-y: auto;
@@ -558,159 +755,227 @@
       flex-direction: column;
       gap: 8px;
     }
+    .batch-empty {
+      font-size: 0.78rem;
+      color: var(--t3);
+      text-align: center;
+      padding: 24px 0;
+      font-family: var(--mono);
+      line-height: 1.7;
+    }
     .batch-result-item {
-      background: var(--bg-card);
+      background: var(--card);
       border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-      padding: 10px 12px;
+      border-radius: var(--r-sm);
+      padding: 10px 13px;
       font-size: 0.78rem;
     }
-    .batch-result-item.success { border-left: 3px solid var(--success); }
-    .batch-result-item.error { border-left: 3px solid var(--danger); }
+    .batch-result-item.success { border-left: 3px solid var(--green); }
+    .batch-result-item.error   { border-left: 3px solid var(--danger); }
     .batch-result-name { font-weight: 600; margin-bottom: 6px; }
-    .batch-result-name.success { color: var(--success); }
-    .batch-result-name.error { color: var(--danger); }
+    .batch-result-name.success { color: var(--green); }
+    .batch-result-name.error   { color: var(--danger); }
     .batch-result-img {
-      width: 100%;
-      max-height: 140px;
-      object-fit: contain;
-      border-radius: 4px;
-      margin-bottom: 8px;
-      border: 1px solid var(--border);
+      width: 100%; max-height: 140px; object-fit: contain;
+      border-radius: 4px; margin-bottom: 8px; border: 1px solid var(--border);
     }
     .batch-counts-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 4px 10px;
-      font-size: 0.75rem;
+      gap: 3px 10px;
+      font-size: 0.74rem;
     }
-    .batch-counts-grid span:first-child { color: var(--text-dim); }
+    .batch-counts-grid span:first-child { color: var(--t3); }
     .batch-summary-text {
-      margin-top: 6px;
-      padding-top: 6px;
+      margin-top: 6px; padding-top: 6px;
       border-top: 1px solid var(--border);
-      color: var(--text-dim);
-      font-size: 0.72rem;
+      color: var(--t3); font-size: 0.7rem;
     }
     .batch-totals-box {
-      background: var(--accent-dim);
-      border: 1px solid var(--border-accent);
-      border-radius: var(--radius-sm);
-      padding: 10px 12px;
+      background: var(--a-dim);
+      border: 1px solid var(--b-accent);
+      border-radius: var(--r-sm);
+      padding: 12px 14px;
       margin-bottom: 10px;
-      font-size: 0.78rem;
     }
     .batch-totals-title {
       color: var(--accent);
       font-weight: 700;
-      margin-bottom: 6px;
-      font-size: 0.72rem;
-      letter-spacing: 0.05em;
+      font-size: 0.68rem;
+      letter-spacing: 0.1em;
       text-transform: uppercase;
+      margin-bottom: 8px;
     }
     .batch-totals-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 4px 10px;
+      font-size: 0.78rem;
     }
 
-    /* ─── Instructions Panel ─────────────────────────────────────────── */
-    .instructions-section {
-      padding: 16px 18px;
-      border-top: 1px solid var(--border);
-    }
-    .instruction-item {
+    /* ════════════════════════════════════════════════════════════════
+       QUICK REFERENCE
+       ════════════════════════════════════════════════════════════════ */
+    .ref-section { padding: 0 20px 22px; border-top: 1px solid var(--border); }
+    .ref-section .sec-head { padding-top: 18px; margin-top: 0; }
+
+    .ref-item {
       display: flex;
       align-items: flex-start;
-      gap: 8px;
-      padding: 6px 0;
+      gap: 11px;
+      padding: 7px 0;
       font-size: 0.78rem;
-      color: var(--text-muted);
+      color: var(--t2);
       border-bottom: 1px solid var(--border);
+      line-height: 1.4;
     }
-    .instruction-item:last-child { border-bottom: none; }
-    .instruction-item-icon {
-      font-size: 0.85rem;
+    .ref-item:last-child { border-bottom: none; }
+    .ref-num {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: var(--a-dim);
+      border: 1px solid var(--b-accent);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.62rem;
+      font-weight: 700;
+      font-family: var(--mono);
+      color: var(--accent);
       flex-shrink: 0;
       margin-top: 1px;
     }
 
-    /* ─── Footer ─────────────────────────────────────────────────────── */
+    /* ════════════════════════════════════════════════════════════════
+       FOOTER
+       ════════════════════════════════════════════════════════════════ */
     .app-footer {
-      padding: 12px 24px;
+      padding: 11px 28px;
       border-top: 1px solid var(--border);
-      font-size: 0.72rem;
-      color: var(--text-dim);
+      background: var(--surface);
       display: flex;
       align-items: center;
       justify-content: space-between;
+      font-size: 0.68rem;
       font-family: var(--mono);
-      background: var(--bg-surface);
+      color: var(--t3);
     }
-    .footer-build { display: flex; gap: 14px; }
-    .footer-build span { display: flex; align-items: center; gap: 4px; }
+    .footer-r { display: flex; align-items: center; gap: 18px; }
+    .footer-dot {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .footer-dot::before {
+      content: '';
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 5px var(--accent);
+    }
 
-    /* ─── Animations ─────────────────────────────────────────────────── */
-    .count-flash {
-      animation: flashCount 0.4s ease-out;
-    }
+    /* ════════════════════════════════════════════════════════════════
+       SCROLLBAR
+       ════════════════════════════════════════════════════════════════ */
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--t3); }
+
+    /* ════════════════════════════════════════════════════════════════
+       ANIMATIONS
+       ════════════════════════════════════════════════════════════════ */
     @keyframes flashCount {
-      0% { transform: scale(1.2); }
+      0%   { transform: scale(1.18); }
       100% { transform: scale(1); }
     }
+    .count-flash { animation: flashCount 0.35s ease-out; }
+
+    .divider { height: 1px; background: var(--border); }
   </style>
 </head>
 <body>
+
+<!-- Decorative engineering symbols -->
+<div class="eng-bg" aria-hidden="true">
+  <span style="color:var(--sym-c)">⚙</span>
+  <span style="color:var(--sym-c)">∑</span>
+  <span style="color:var(--sym-c)">∫</span>
+  <span style="color:var(--sym-c)">π</span>
+  <span style="color:var(--sym-c)">Δ</span>
+  <span style="color:var(--sym-c)">λ</span>
+  <span style="color:var(--sym-c)">∇</span>
+  <span style="color:var(--sym-c)">φ</span>
+  <span style="color:var(--sym-c)">Ω</span>
+  <span style="color:var(--sym-c)">≈</span>
+  <span style="color:var(--sym-c)">∂</span>
+  <span style="color:var(--sym-c)">μ</span>
+</div>
+
 <div class="app-shell">
 
-  <!-- ── Top Bar ──────────────────────────────────────────────────────── -->
+  <!-- ── Top Bar ──────────────────────────────────────────────────── -->
   <header class="topbar">
-    <div class="topbar-left">
-      <div class="logo-icon">&#x1F41F;</div>
+    <div class="logo">
+      <div class="logo-badge">
+        <!-- Stylised fish / water-flow SVG -->
+        <svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+          <!-- Body -->
+          <ellipse cx="14" cy="16" rx="10" ry="7"/>
+          <!-- Tail -->
+          <polygon points="4,10 1,16 4,22"/>
+          <!-- Eye -->
+          <circle cx="20" cy="14" r="2.2" fill="rgba(0,80,180,0.7)"/>
+          <circle cx="20.8" cy="13.2" r="0.8" fill="rgba(255,255,255,0.9)"/>
+          <!-- Dorsal fin -->
+          <path d="M12 9 Q16 5 20 9" stroke="rgba(255,255,255,0.7)" stroke-width="1.4" fill="none" stroke-linecap="round"/>
+          <!-- Wave detail lines -->
+          <path d="M27 12 Q30 14 27 16 Q30 18 27 20" stroke="rgba(255,255,255,0.4)" stroke-width="1.2" fill="none" stroke-linecap="round"/>
+        </svg>
+      </div>
       <div class="logo-text">
-        <span class="logo-title">AquaCount</span>
-        <span class="logo-sub">CATFISH FINGERLING INTELLIGENCE SYSTEM</span>
+        <span class="logo-name">Aqua<em>Count</em></span>
+        <span class="logo-sub">Catfish Fingerling Intelligence System</span>
       </div>
     </div>
+
     <div class="topbar-right">
-      <div class="conn-badge" id="conn-badge">
+      <div class="conn-badge disconnected" id="conn-badge">
         <span class="conn-dot"></span>
         <span id="conn-label">Connecting…</span>
       </div>
-      <button class="icon-btn" id="theme-toggle" title="Toggle theme" onclick="toggleTheme()">&#9790;</button>
+      <button class="icon-btn" id="theme-toggle" title="Toggle light / dark" onclick="toggleTheme()">☾</button>
     </div>
   </header>
 
-  <!-- ── Main ─────────────────────────────────────────────────────────── -->
+  <!-- ── Main Content ─────────────────────────────────────────────── -->
   <div class="main-content">
 
     <!-- Left Column -->
     <div class="left-panel">
 
-      <!-- Video Feed Card -->
-      <div class="card video-card">
+      <!-- Video Feed -->
+      <div class="card">
         <div class="card-header">
-          <span class="card-title"><span class="card-title-dot"></span>Live Video Feed</span>
-          <span id="timestamp" style="font-size:0.72rem;font-family:var(--mono);color:var(--text-dim)"></span>
-        </div>
-        <div class="video-wrapper" id="video-wrapper">
-          <div class="video-placeholder" id="video-placeholder">
-            <div class="video-placeholder-icon">&#x1F4F9;</div>
-            <div class="video-placeholder-text">No active source — select an input below</div>
-          </div>
-          <img class="video-feed-img" id="video-feed" alt="Video Feed" style="display:none;" />
-          <div class="live-badge" id="live-badge">&#x25CF; LIVE</div>
+          <span class="card-title"><span class="card-pip"></span>Live Video Feed</span>
+          <span id="timestamp" style="font-size:0.68rem;font-family:var(--mono);color:var(--t3);"></span>
         </div>
 
-        <!-- Zoom Controls -->
+        <div class="video-wrapper" id="video-wrapper">
+          <div class="video-placeholder" id="video-placeholder">
+            <div class="vp-icon">📹</div>
+            <div class="vp-text">No active source — select an input below</div>
+          </div>
+          <img class="video-feed-img" id="video-feed" alt="Video Feed" style="display:none;" />
+          <div class="live-badge" id="live-badge">● LIVE</div>
+        </div>
+
+        <!-- Zoom -->
         <div class="zoom-controls">
-          <span class="zoom-label">&#x1F50D; ZOOM</span>
-          <input
-            class="zoom-slider"
-            id="zoom-slider"
-            type="range"
-            min="1" max="4" step="0.1" value="1"
-          />
+          <span class="zoom-label">🔍 Zoom</span>
+          <input class="zoom-slider" id="zoom-slider" type="range" min="1" max="4" step="0.1" value="1" />
           <span class="zoom-val-display" id="zoom-val">1.0×</span>
           <div class="zoom-presets">
             <button class="zoom-preset-btn active" onclick="setZoom(1)">1×</button>
@@ -722,7 +987,7 @@
         <!-- Status Bar -->
         <div class="video-status-bar">
           <div class="status-item">
-            <span class="status-label">FRAME</span>
+            <span class="status-label">Frame</span>
             <span class="status-val" id="s-frame">—</span>
           </div>
           <div class="status-item">
@@ -730,7 +995,7 @@
             <span class="status-val" id="s-fps">—</span>
           </div>
           <div class="status-item">
-            <span class="status-label">SOURCE</span>
+            <span class="status-label">Source</span>
             <span class="status-val" id="s-source">—</span>
           </div>
           <div class="status-item" style="margin-left:auto;">
@@ -739,74 +1004,77 @@
         </div>
       </div>
 
-      <!-- Input Source Card -->
+      <!-- Input Source -->
       <div class="card">
         <div class="card-header">
-          <span class="card-title"><span class="card-title-dot"></span>Input Source</span>
+          <span class="card-title"><span class="card-pip"></span>Input Source</span>
         </div>
 
         <div class="tab-list" role="tablist">
-          <button class="tab-btn active" data-tab="camera" onclick="switchTab(this)">&#x1F4F7; Camera</button>
-          <button class="tab-btn" data-tab="upload" onclick="switchTab(this)">&#x1F4E4; Upload File</button>
-          <button class="tab-btn" data-tab="batch" onclick="switchTab(this)">&#x1F4C1; Batch Images</button>
-          <button class="tab-btn" data-tab="url" onclick="switchTab(this)">&#x1F517; Video URL</button>
+          <button class="tab-btn active" data-tab="camera" onclick="switchTab(this)">
+            <span>📷</span> Camera
+          </button>
+          <button class="tab-btn" data-tab="upload" onclick="switchTab(this)">
+            <span>📤</span> Upload
+          </button>
+          <button class="tab-btn" data-tab="batch" onclick="switchTab(this)">
+            <span>📁</span> Batch
+          </button>
+          <button class="tab-btn" data-tab="url" onclick="switchTab(this)">
+            <span>🔗</span> URL
+          </button>
         </div>
 
-        <!-- Camera Tab -->
+        <!-- Camera -->
         <div class="tab-pane active" id="tab-camera">
           <div class="field">
             <label>Camera Index</label>
             <input type="text" id="camera-index" value="0" placeholder="0 = default webcam" />
-            <div class="hint">Try 0, 1, or 2 for USB cameras. RTSP streams are set in the URL tab.</div>
+            <div class="hint">Try 0, 1, or 2 for USB cameras. RTSP streams are configured in the URL tab.</div>
           </div>
-          <button class="btn btn-success" onclick="startCamera()">&#x25B6; Start Camera</button>
+          <button class="btn btn-success" onclick="startCamera()">▶ Start Camera</button>
         </div>
 
-        <!-- Upload Tab -->
+        <!-- Upload -->
         <div class="tab-pane" id="tab-upload">
           <div class="field">
             <label>Upload Video or Image</label>
             <input type="file" id="file-input" accept="video/*,image/*" />
             <div class="hint">Supports MP4, AVI, MOV, JPG, PNG (max 500 MB)</div>
           </div>
-          <button class="btn btn-primary" onclick="uploadFile()">&#x1F4E4; Upload &amp; Process</button>
+          <button class="btn btn-primary" onclick="uploadFile()">📤 Upload &amp; Process</button>
         </div>
 
-        <!-- Batch Tab -->
+        <!-- Batch -->
         <div class="tab-pane" id="tab-batch">
           <div class="field">
             <label>Upload Multiple Images</label>
             <input type="file" id="batch-file-input" accept="image/*" multiple />
-            <div class="hint">
-              Select multiple images. Each image is analysed independently and
-              results are shown below with annotated thumbnails.
-            </div>
+            <div class="hint">Select multiple images. Each is analysed independently with annotated thumbnails.</div>
           </div>
-          <button class="btn btn-primary" onclick="uploadBatch()">&#x1F4CA; Analyse Batch</button>
-          <div id="batch-progress" style="margin-top:10px;display:none;">
-            <div style="font-size:0.78rem;color:var(--accent);">Files processed: <strong id="batch-count">0</strong></div>
+          <button class="btn btn-primary" onclick="uploadBatch()">📊 Analyse Batch</button>
+          <div id="batch-progress" style="margin-top:10px;display:none;font-size:0.78rem;color:var(--accent);">
+            Files processed: <strong id="batch-count">0</strong>
           </div>
         </div>
 
-        <!-- URL Tab -->
+        <!-- URL -->
         <div class="tab-pane" id="tab-url">
           <div class="field">
             <label>Video URL</label>
             <input type="text" id="url-input" placeholder="YouTube URL, RTSP stream, or direct MP4 link" />
             <div class="hint">YouTube, RTSP://, RTMP://, and direct HTTP video URLs are supported.</div>
           </div>
-          <button class="btn btn-primary" onclick="processUrl()">&#x1F310; Process URL</button>
+          <button class="btn btn-primary" onclick="processUrl()">🌐 Process URL</button>
         </div>
 
-        <!-- Action buttons always visible -->
-        <div class="btn-group" style="padding:0 18px 16px;">
-          <button class="btn btn-danger" onclick="stopProcessing()">&#x23F9; Stop</button>
-          <button class="btn btn-ghost" onclick="resetCounts()">&#x21BA; Reset Counts</button>
+        <div class="btn-group">
+          <button class="btn btn-danger" onclick="stopProcessing()">⏹ Stop</button>
+          <button class="btn btn-ghost" onclick="resetCounts()">↺ Reset Counts</button>
         </div>
 
-        <!-- Status Banner -->
         <div class="status-banner" id="status-banner">
-          <span id="status-icon">&#x2139;</span>
+          <span id="status-icon">ℹ</span>
           <span id="status-message">Ready</span>
         </div>
       </div>
@@ -816,48 +1084,42 @@
     <!-- Right Column -->
     <div class="right-panel">
 
-      <!-- Count Stats -->
+      <!-- Detection Summary -->
       <div class="stats-section">
-        <div class="stats-section-title">&#x1F4CA; Detection Summary</div>
+        <div class="sec-head">📊 Detection Summary</div>
         <div class="stats-grid">
-          <div class="stat-card total">
-            <div class="stat-icon">&#x2211;</div>
-            <div class="stat-value" id="v-total">0</div>
-            <div class="stat-label">Total Counted</div>
+          <div class="stat-card s-total">
+            <div class="stat-val" id="v-total">0</div>
+            <div class="stat-lbl">Total Counted</div>
           </div>
-          <div class="stat-card fingerling">
-            <div class="stat-icon">&#x1F41F;</div>
-            <div class="stat-value" id="v-fingerling">0</div>
-            <div class="stat-label">Fingerling</div>
+          <div class="stat-card s-finger">
+            <div class="stat-val" id="v-fingerling">0</div>
+            <div class="stat-lbl">Fingerling</div>
           </div>
-          <div class="stat-card post">
-            <div class="stat-icon">&#x1F4CF;</div>
-            <div class="stat-value" id="v-post">0</div>
-            <div class="stat-label">Post-Fingerling</div>
+          <div class="stat-card s-post">
+            <div class="stat-val" id="v-post">0</div>
+            <div class="stat-lbl">Post-Fingerling</div>
           </div>
-          <div class="stat-card juvenile">
-            <div class="stat-icon">&#x1F420;</div>
-            <div class="stat-value" id="v-juvenile">0</div>
-            <div class="stat-label">Juvenile</div>
+          <div class="stat-card s-juv">
+            <div class="stat-val" id="v-juvenile">0</div>
+            <div class="stat-lbl">Juvenile</div>
           </div>
-          <div class="stat-card unknown">
-            <div class="stat-icon">&#x2753;</div>
-            <div class="stat-value" id="v-unknown">0</div>
-            <div class="stat-label">Unknown</div>
+          <div class="stat-card s-unk">
+            <div class="stat-val" id="v-unknown">0</div>
+            <div class="stat-lbl">Unknown</div>
           </div>
-          <div class="stat-card active">
-            <div class="stat-icon">&#x1F441;</div>
-            <div class="stat-value" id="v-active">0</div>
-            <div class="stat-label">In Frame Now</div>
+          <div class="stat-card s-active">
+            <div class="stat-val" id="v-active">0</div>
+            <div class="stat-lbl">In Frame Now</div>
           </div>
         </div>
       </div>
 
       <div class="divider"></div>
 
-      <!-- Distribution Chart -->
+      <!-- Class Distribution Chart -->
       <div class="chart-section">
-        <div class="stats-section-title">&#x1F4C8; Class Distribution</div>
+        <div class="sec-head">📈 Class Distribution</div>
         <div class="chart-wrap">
           <canvas id="dist-chart"></canvas>
         </div>
@@ -867,38 +1129,38 @@
 
       <!-- Batch Results -->
       <div class="batch-section">
-        <div class="stats-section-title">&#x1F5BC; Batch Results</div>
+        <div class="sec-head">🖼 Batch Results</div>
         <div class="batch-result-list" id="batch-result-list">
-          <div style="font-size:0.78rem;color:var(--text-dim);text-align:center;padding:20px 0;">
-            No batch processed yet.<br />Use the Batch Images tab to upload multiple images.
+          <div class="batch-empty">
+            No batch processed yet.<br>Use the Batch tab to upload multiple images.
           </div>
         </div>
       </div>
 
       <div class="divider"></div>
 
-      <!-- Instructions -->
-      <div class="instructions-section">
-        <div class="stats-section-title" style="margin-bottom:10px;">&#x1F4D6; Quick Reference</div>
-        <div class="instruction-item">
-          <span class="instruction-item-icon">1&#xFE0F;&#x20E3;</span>
-          <span>Pick a source: Camera, upload a file, or enter a URL.</span>
+      <!-- Quick Reference -->
+      <div class="ref-section">
+        <div class="sec-head">📖 Quick Reference</div>
+        <div class="ref-item">
+          <span class="ref-num">1</span>
+          <span>Pick a source: Camera, upload a file, or paste a video URL.</span>
         </div>
-        <div class="instruction-item">
-          <span class="instruction-item-icon">2&#xFE0F;&#x20E3;</span>
-          <span>Fish crossing the counting line are tracked &amp; tallied.</span>
+        <div class="ref-item">
+          <span class="ref-num">2</span>
+          <span>Fish crossing the counting line are tracked and tallied automatically.</span>
         </div>
-        <div class="instruction-item">
-          <span class="instruction-item-icon">3&#xFE0F;&#x20E3;</span>
-          <span>Use the zoom slider to magnify distant juveniles and verify size class.</span>
+        <div class="ref-item">
+          <span class="ref-num">3</span>
+          <span>Use the zoom slider to magnify and verify size classification.</span>
         </div>
-        <div class="instruction-item">
-          <span class="instruction-item-icon">4&#xFE0F;&#x20E3;</span>
-          <span>Batch mode processes multiple images at once with per-image summaries.</span>
+        <div class="ref-item">
+          <span class="ref-num">4</span>
+          <span>Batch mode processes multiple images with per-image annotated results.</span>
         </div>
-        <div class="instruction-item">
-          <span class="instruction-item-icon">5&#xFE0F;&#x20E3;</span>
-          <span>Hit Reset Counts to start a new counting session.</span>
+        <div class="ref-item">
+          <span class="ref-num">5</span>
+          <span>Hit Reset Counts to clear all tallies and start a new session.</span>
         </div>
       </div>
 
@@ -907,10 +1169,10 @@
 
   <!-- Footer -->
   <footer class="app-footer">
-    <span>AquaCount v1.0.0 — Catfish Fingerling Intelligence System</span>
-    <div class="footer-build">
-      <span>&#x25CF; Backend: <a id="footer-api-url" href="#" target="_blank">API</a></span>
-      <span>&#x25CB; Model: ONNX / YOLO</span>
+    <span>AquaCount v1.0.0 &middot; Catfish Fingerling Intelligence System</span>
+    <div class="footer-r">
+      <span class="footer-dot">Backend: <a id="footer-api-url" href="#" target="_blank" style="margin-left:4px;">API</a></span>
+      <span>Model: ONNX / YOLOv8</span>
     </div>
   </footer>
 
@@ -947,10 +1209,15 @@ const distChart = new Chart(chartCtx, {
     labels: ['Fingerling', 'Post-Fingerling', 'Juvenile', 'Unknown'],
     datasets: [{
       data: [0, 0, 0, 0],
-      backgroundColor: ['#00ff88cc','#ffb347cc','#fb923ccc','#6b7a9977'],
-      borderColor:     ['#00ff88','#ffb347','#fb923c','#6b7a99'],
+      backgroundColor: [
+        'rgba(34,197,94,0.75)',
+        'rgba(245,158,11,0.75)',
+        'rgba(249,115,22,0.75)',
+        'rgba(100,116,139,0.45)',
+      ],
+      borderColor: ['#22c55e','#f59e0b','#f97316','#64748b'],
       borderWidth: 1,
-      borderRadius: 5,
+      borderRadius: 6,
     }]
   },
   options: {
@@ -961,14 +1228,14 @@ const distChart = new Chart(chartCtx, {
       y: {
         beginAtZero: true,
         ticks: {
-          color: '#6b7a99',
+          color: '#64748b',
           font: { size: 10, family: "'JetBrains Mono', monospace" },
           precision: 0,
         },
-        grid: { color: 'rgba(255,255,255,0.05)' }
+        grid: { color: 'rgba(255,255,255,0.04)' }
       },
       x: {
-        ticks: { color: '#6b7a99', font: { size: 9 } },
+        ticks: { color: '#64748b', font: { size: 9 } },
         grid: { display: false }
       }
     }
@@ -977,10 +1244,10 @@ const distChart = new Chart(chartCtx, {
 
 function updateChart(counts) {
   distChart.data.datasets[0].data = [
-    counts.fingerling     || 0,
+    counts.fingerling      || 0,
     counts.post_fingerling || 0,
-    counts.juvenile       || 0,
-    counts.unknown        || 0,
+    counts.juvenile        || 0,
+    counts.unknown         || 0,
   ];
   distChart.update('none');
 }
@@ -1052,7 +1319,7 @@ function setStatVal(id, val) {
     el.textContent = val;
     if (val !== prev && val > 0) {
       el.classList.remove('count-flash');
-      void el.offsetWidth; // reflow
+      void el.offsetWidth;
       el.classList.add('count-flash');
     }
   }
@@ -1138,7 +1405,8 @@ function uploadBatch() {
   for (const f of files) form.append('files', f);
   showStatus('Uploading ' + files.length + ' image(s)…', 'info');
   document.getElementById('batch-progress').style.display = 'block';
-  document.getElementById('batch-result-list').innerHTML = '<div style="font-size:0.78rem;color:var(--text-dim);text-align:center;padding:16px 0;">Analysing…</div>';
+  document.getElementById('batch-result-list').innerHTML =
+    '<div class="batch-empty">Analysing…</div>';
   fetch(API_BASE + '/api/upload_batch', { method:'POST', body: form })
     .then(r => r.json())
     .then(d => {
@@ -1184,11 +1452,10 @@ function resetCounts() {
 // ─── Status Banner ────────────────────────────────────────────────────────────
 function showStatus(msg, type) {
   const el = document.getElementById('status-banner');
-  const msgEl = document.getElementById('status-message');
-  const iconEl = document.getElementById('status-icon');
   el.className = 'status-banner ' + type;
-  msgEl.textContent = msg;
-  iconEl.textContent = type === 'info' ? '⏳' : type === 'success' ? '✔' : '⚠';
+  document.getElementById('status-message').textContent = msg;
+  document.getElementById('status-icon').textContent =
+    type === 'info' ? '⏳' : type === 'success' ? '✔' : '⚠';
 }
 
 // ─── Batch Results Renderer ───────────────────────────────────────────────────
@@ -1196,10 +1463,9 @@ function renderBatchResults(data) {
   const list = document.getElementById('batch-result-list');
   let html = '';
 
-  // Totals
   const bt = data.batch_totals || {};
   html += `<div class="batch-totals-box">
-    <div class="batch-totals-title">&#x1F4CA; Batch Totals</div>
+    <div class="batch-totals-title">📊 Batch Totals</div>
     <div class="batch-totals-grid">
       <span style="color:var(--text-dim)">Total</span>
       <span style="color:var(--accent);font-weight:700">${bt.total||0}</span>
@@ -1208,7 +1474,7 @@ function renderBatchResults(data) {
       <span style="color:var(--text-dim)">Post-Fingerling</span>
       <span style="color:var(--warning);font-weight:700">${bt.post_fingerling||0}</span>
       <span style="color:var(--text-dim)">Juvenile</span>
-      <span style="color:#fb923c;font-weight:700">${bt.juvenile||0}</span>
+      <span style="color:#f97316;font-weight:700">${bt.juvenile||0}</span>
       <span style="color:var(--text-dim)">Unknown</span>
       <span style="color:var(--text-muted);font-weight:700">${bt.unknown||0}</span>
     </div>
@@ -1217,7 +1483,7 @@ function renderBatchResults(data) {
   (data.results || []).forEach(r => {
     const ok = r.status === 'success';
     html += `<div class="batch-result-item ${ok ? 'success' : 'error'}">
-      <div class="batch-result-name ${ok ? 'success' : 'error'}">${ok ? '&#x2713;' : '&#x2717;'} ${r.filename}</div>`;
+      <div class="batch-result-name ${ok ? 'success' : 'error'}">${ok ? '✓' : '✗'} ${r.filename}</div>`;
     if (ok) {
       if (r.annotated_image) {
         html += `<img class="batch-result-img" src="data:image/jpeg;base64,${r.annotated_image}" alt="${r.filename}" />`;
@@ -1227,7 +1493,7 @@ function renderBatchResults(data) {
         <span>Total</span><span style="color:var(--accent);font-weight:700">${c.total||0}</span>
         <span>Fingerling</span><span style="color:var(--success);font-weight:700">${c.fingerling||0}</span>
         <span>Post-Fingerling</span><span style="color:var(--warning);font-weight:700">${c.post_fingerling||0}</span>
-        <span>Juvenile</span><span style="color:#fb923c;font-weight:700">${c.juvenile||0}</span>
+        <span>Juvenile</span><span style="color:#f97316;font-weight:700">${c.juvenile||0}</span>
         <span>Unknown</span><span style="color:var(--text-muted);font-weight:700">${c.unknown||0}</span>
       </div>`;
       if (r.label_summary) {
