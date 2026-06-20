@@ -21,7 +21,6 @@ import numpy as np
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from models.detector import FingerlingDetector, FingerlingDetectorFallback
 from models.tracker import FingerlingTracker
 from video.processor import VideoProcessor, VideoWriter, ImageProcessor, URLVideoHandler
 from video.visualization import Visualizer, VisualizationConfig
@@ -151,23 +150,39 @@ class FingerlingCounter:
         """Initialize all processing components."""
         model_config = self.config.get('model', {})
         
-        # Detector
-        try:
-            self.detector = FingerlingDetector(
-                weights_path=self.weights_path,
-                model_engine=self.model_engine,
-                pretrained_model=self.pretrained_model,
+        # Detector — lazy import so torch/ultralytics are never loaded on Render
+        # (where only models/best.onnx is present and requirements-prod.txt
+        # contains onnxruntime but NOT torch or ultralytics).
+        weights = str(self.weights_path or '')
+        if weights.lower().endswith('.onnx'):
+            from models.onnx_detector import OnnxFingerlingDetector
+            self.detector = OnnxFingerlingDetector(
+                weights,
                 confidence_threshold=model_config.get('confidence_threshold', 0.5),
                 iou_threshold=model_config.get('iou_threshold', 0.45),
-                device=model_config.get('device', 'auto'),
-                dark_surface_filter_enabled=model_config.get('dark_surface_filter', {}).get('enabled', False),
-                dark_surface_min_value_mean=model_config.get('dark_surface_filter', {}).get('min_value_mean', 45.0),
-                dark_surface_max_value_std=model_config.get('dark_surface_filter', {}).get('max_value_std', 28.0),
-                dark_surface_max_saturation_mean=model_config.get('dark_surface_filter', {}).get('max_saturation_mean', 65.0)
             )
-        except Exception as e:
-            print(f"Warning: Could not load YOLO model ({e}). Using fallback detector.")
-            self.detector = FingerlingDetectorFallback()
+        else:
+            try:
+                from models.detector import FingerlingDetector
+                self.detector = FingerlingDetector(
+                    weights_path=self.weights_path,
+                    model_engine=self.model_engine,
+                    pretrained_model=self.pretrained_model,
+                    confidence_threshold=model_config.get('confidence_threshold', 0.5),
+                    iou_threshold=model_config.get('iou_threshold', 0.45),
+                    device=model_config.get('device', 'auto'),
+                    dark_surface_filter_enabled=model_config.get('dark_surface_filter', {}).get('enabled', False),
+                    dark_surface_min_value_mean=model_config.get('dark_surface_filter', {}).get('min_value_mean', 45.0),
+                    dark_surface_max_value_std=model_config.get('dark_surface_filter', {}).get('max_value_std', 28.0),
+                    dark_surface_max_saturation_mean=model_config.get('dark_surface_filter', {}).get('max_saturation_mean', 65.0)
+                )
+            except Exception as e:
+                print(f"Warning: Could not load YOLO model ({e}). Using fallback detector.")
+                try:
+                    from models.detector import FingerlingDetectorFallback
+                except ImportError:
+                    from models.onnx_detector import _FallbackDetector as FingerlingDetectorFallback
+                self.detector = FingerlingDetectorFallback()
         
         # Tracker
         tracking_config = self.config.get('tracking', {})
