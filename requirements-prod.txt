@@ -24,11 +24,9 @@ flask>=3.0.0
 flask-cors>=4.0.0
 flask-socketio>=5.3.0
 python-socketio>=5.9.0
-# Gunicorn + eventlet for async Socket.IO on Render
-# Pinned to 21.2.0 — Gunicorn 22 removed the eventlet worker entirely;
-# 21.2.0 is the last release that ships gunicorn.workers.geventlet
-gunicorn==21.2.0
-eventlet>=0.35.1
+# Gunicorn with gthread worker — works with Flask-SocketIO async_mode='threading'
+# No eventlet/gevent needed; gthread is built into gunicorn.
+gunicorn>=22.0.0
 
 # ── Utilities ─────────────────────────────────────────────────────────────────
 pyyaml>=6.0.0

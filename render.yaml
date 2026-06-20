@@ -8,13 +8,14 @@ services:
     # Install production-only dependencies (no PyTorch)
     buildCommand: pip install -r requirements-prod.txt
 
-    # Gunicorn with eventlet worker for Socket.IO async support
-    # --timeout 120  avoids Render's 30-s idle kill during video processing
-    # --workers 1    keeps RAM inside the free-tier 512 MB envelope
+    # gthread worker: built-in to gunicorn, no extras needed.
+    # Flask-SocketIO uses async_mode='threading' which pairs with gthread.
+    # --workers 1 --threads 4  stays within Render free-tier 512 MB RAM.
     startCommand: >
       gunicorn
-      --worker-class eventlet
+      --worker-class gthread
       --workers 1
+      --threads 4
       --bind 0.0.0.0:$PORT
       --timeout 120
       --keep-alive 5
