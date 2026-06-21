@@ -114,9 +114,13 @@ class StreamingServer:
         self.is_processing = False
         self.frame_lock = threading.Lock()
         self.data_lock = threading.Lock()
-        
-        # Frame queue for MJPEG streaming
+
+        # Frame queue for MJPEG streaming (local/same-origin)
         self.frame_queue: Queue = Queue(maxsize=10)
+
+        # Socket.IO frame emission rate-limiter (~8 fps cap)
+        self._last_frame_emit: float = 0.0
+        self._FRAME_MIN_INTERVAL: float = 0.12  # seconds between emitted frames
         
         # Processing results for images
         self.image_results: Dict[str, Any] = {}
@@ -513,19 +517,43 @@ class StreamingServer:
     def update_frame(self, frame: np.ndarray) -> None:
         """
         Update current frame for streaming.
-        
+
+        Emits the annotated frame to all connected Socket.IO clients as a
+        base64-encoded JPEG (≤640 px wide, quality 65) at a capped rate of
+        ~8 fps.  This is the primary delivery path for cross-origin web
+        clients (Vercel → Render).  The MJPEG /video_feed endpoint remains
+        available for same-origin / local use.
+
         Args:
-            frame: Annotated video frame.
+            frame: Annotated video frame (BGR, any resolution).
         """
         with self.frame_lock:
             self.current_frame = frame.copy()
-        
-        # Add to queue for MJPEG stream
+
+        # MJPEG queue (local / same-origin /video_feed endpoint)
         try:
             if self.frame_queue.full():
                 self.frame_queue.get_nowait()
             self.frame_queue.put_nowait(frame)
-        except:
+        except Exception:
+            pass
+
+        # Socket.IO frame — rate-limited to ~8 fps
+        now = time.time()
+        if now - self._last_frame_emit < self._FRAME_MIN_INTERVAL:
+            return
+        self._last_frame_emit = now
+        try:
+            h, w = frame.shape[:2]
+            if w > 640:
+                scale = 640.0 / w
+                small = cv2.resize(frame, (640, int(h * scale)), interpolation=cv2.INTER_AREA)
+            else:
+                small = frame
+            _, buf = cv2.imencode('.jpg', small, [cv2.IMWRITE_JPEG_QUALITY, 65])
+            b64 = base64.b64encode(buf).decode('ascii')
+            self.socketio.emit('frame', {'img': b64})
+        except Exception:
             pass
     
     def update_data(

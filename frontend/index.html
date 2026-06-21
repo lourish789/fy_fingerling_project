@@ -1200,6 +1200,7 @@ const socket = io(API_BASE, {
 // ─── State ─────────────────────────────────────────────────────────────────
 let isProcessing = false;
 let currentZoom = 1;
+let _frameIdleTimer = null;
 
 // ─── Chart ─────────────────────────────────────────────────────────────────
 const chartCtx = document.getElementById('dist-chart').getContext('2d');
@@ -1326,17 +1327,38 @@ function setStatVal(id, val) {
 }
 
 // ─── Video Feed ─────────────────────────────────────────────────────────────
+// Frames arrive via Socket.IO 'frame' events (base64 JPEG).
+// setVideoActive(true) just shows a "waiting" state; the img becomes visible
+// when the first frame arrives.  This avoids cross-origin MJPEG issues.
+
+socket.on('frame', (data) => {
+  const img = document.getElementById('video-feed');
+  const placeholder = document.getElementById('video-placeholder');
+  img.src = 'data:image/jpeg;base64,' + data.img;
+  img.style.display = 'block';
+  placeholder.style.display = 'none';
+
+  // Reset idle watchdog — if no frame for 4 s and not processing, hide feed
+  clearTimeout(_frameIdleTimer);
+  if (!isProcessing) {
+    _frameIdleTimer = setTimeout(() => setVideoActive(false), 4000);
+  }
+});
+
 function setVideoActive(active) {
   const img = document.getElementById('video-feed');
   const placeholder = document.getElementById('video-placeholder');
+  clearTimeout(_frameIdleTimer);
   if (active) {
-    img.src = API_BASE + '/video_feed?ts=' + Date.now();
-    img.style.display = 'block';
-    placeholder.style.display = 'none';
+    // Show placeholder with waiting text until first frame socket event fires
+    placeholder.style.display = 'flex';
+    placeholder.querySelector('.vp-text').textContent = 'Waiting for frames…';
+    img.style.display = 'none';
   } else {
     img.removeAttribute('src');
     img.style.display = 'none';
     placeholder.style.display = 'flex';
+    placeholder.querySelector('.vp-text').textContent = 'No active source — select an input below';
     document.getElementById('live-badge').classList.remove('active');
   }
 }

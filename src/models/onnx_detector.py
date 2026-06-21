@@ -236,4 +236,58 @@ class OnnxFingerlingDetector:
                 }
             )
 
+        return self._apply_size_consistency(detections, orig_h, orig_w)
+
+    def _apply_size_consistency(
+        self,
+        detections: List[Dict[str, Any]],
+        orig_h: int,
+        orig_w: int,
+    ) -> List[Dict[str, Any]]:
+        """
+        Relative-size sanity check applied after YOLO inference.
+
+        When the camera is far away every fish appears small in pixels, so
+        YOLO may predict a class that matched that pixel scale in training
+        (e.g. labelling a post-fingerling as "juvenile" because it resembles
+        a juvenile-sized patch from closer footage).
+
+        This check compares each detection's bounding-box area against:
+          1. The median area of all detections in this frame (relative rank).
+          2. Its fraction of the total frame area (absolute scale guard).
+
+        Only predictions with confidence < 0.70 are adjusted — confident
+        model predictions are never overridden.
+        """
+        if len(detections) < 2:
+            return detections
+
+        frame_area = float(orig_h * orig_w)
+        areas = np.array([d["area"] for d in detections], dtype=float)
+        median_area = float(np.median(areas))
+        if median_area < 1:
+            return detections
+
+        for d in detections:
+            if d["confidence"] >= 0.70:
+                continue
+
+            rel_to_median = d["area"] / median_area
+            rel_to_frame  = d["area"] / frame_area
+            cls = d["class_name"]
+            new_cls: Optional[str] = None
+
+            # Fish much smaller than its peers → unlikely to be juvenile
+            if cls == "juvenile" and (rel_to_median < 0.35 or rel_to_frame < 0.003):
+                new_cls = "post_fingerling"
+
+            # Fish much larger than its peers → unlikely to be a fingerling
+            elif cls == "fingerling" and rel_to_median > 3.5:
+                new_cls = "post_fingerling"
+
+            if new_cls:
+                d["class_name"] = new_cls
+                d["class_display_name"] = _display_name(new_cls)
+                d["class_color"] = CLASS_COLORS.get(new_cls, CLASS_COLORS["unknown"])
+
         return detections
