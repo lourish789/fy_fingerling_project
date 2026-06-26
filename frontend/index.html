@@ -1294,7 +1294,8 @@ socket.on('processing_started', (data) => {
 });
 socket.on('processing_completed', () => {
   isProcessing = false;
-  setVideoActive(false);
+  // Keep the last annotated frame visible so users can review labelled output.
+  // Feed only hides on: counts_reset, processing_error, or disconnect.
   showStatus('Processing complete.', 'success');
 });
 socket.on('processing_error', (data) => {

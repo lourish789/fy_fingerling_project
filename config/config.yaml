@@ -6,7 +6,7 @@ model:
   engine: "ultralytics"
   weights: "best.pt"  # Path to trained weights
   pretrained: "yolov26n.pt"  # Preferred base checkpoint (falls back to yolov8n.pt if unavailable)
-  confidence_threshold: 0.2
+  confidence_threshold: 0.15
   iou_threshold: 0.45
   device: "auto"  # "auto", "cuda", "cpu"
   dark_surface_filter:

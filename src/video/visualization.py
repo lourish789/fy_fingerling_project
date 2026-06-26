@@ -48,19 +48,18 @@ class Visualizer:
     ) -> np.ndarray:
         annotated = frame.copy()
 
-        for det in detections:
+        for i, det in enumerate(detections):
             x1, y1, x2, y2 = det['bbox']
             class_key = det.get('class_name', det.get('size_category', 'unknown'))
             color = det.get('class_color', det.get('size_color',
                             self.SIZE_COLORS.get(class_key, (128, 128, 128))))
 
-            # Thin bounding box
             cv2.rectangle(annotated, (x1, y1), (x2, y2), color,
                           self.config.line_thickness)
 
             if self.config.show_size_labels:
-                label = det.get('class_display_name', det.get('size_name', 'Fish'))
-                # Compact label: class name only (confidence omitted to keep frame clean)
+                class_name = det.get('class_display_name', det.get('size_name', 'Fish'))
+                label = f"#{i + 1} {class_name}"
                 (lw, lh), _ = cv2.getTextSize(
                     label, self.font, self.config.font_scale, 1)
 
@@ -95,8 +94,7 @@ class Visualizer:
             cv2.rectangle(annotated, (x1, y1), (x2, y2), color,
                           self.config.line_thickness)
 
-            # Label: class name only (track ID hidden from production frame)
-            label = getattr(track, 'class_display_name', 'Fish')
+            label = f"#{track.track_id} {getattr(track, 'class_display_name', 'Fish')}"
             (lw, lh), _ = cv2.getTextSize(
                 label, self.font, self.config.font_scale, 1)
             cv2.rectangle(annotated,

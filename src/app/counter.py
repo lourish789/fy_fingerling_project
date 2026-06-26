@@ -284,7 +284,7 @@ class FingerlingCounter:
 
         source_str = str(source)
         if isinstance(source, str) and (ImageProcessor.is_image_file(source_str) or ImageProcessor.is_image_url(source_str)):
-            image_result = self.process_image_file(source_str, no_annotations=True)
+            image_result = self.process_image_file(source_str, no_annotations=False)
             if 'error' in image_result:
                 raise RuntimeError(image_result['error'])
 
