@@ -301,11 +301,20 @@ class FingerlingCounter:
                     is_live=False
                 )
 
+                import base64
+                annotated_b64 = None
+                try:
+                    _, buf = cv2.imencode('.jpg', image_result['annotated_image'],
+                                         [cv2.IMWRITE_JPEG_QUALITY, 80])
+                    annotated_b64 = base64.b64encode(buf).decode('ascii')
+                except Exception:
+                    pass
                 self.streaming_server.set_image_result({
                     'source': source_str,
                     'counts': image_result['counts'],
                     'size_distribution': image_result['size_distribution'],
                     'detections': len(image_result['detections']),
+                    'annotated_image_b64': annotated_b64,
                     'label_summary': ', '.join(
                         f"{class_key.replace('_', ' ').title()}: {int(image_result['counts'].get(class_key, 0) or 0)}"
                         for class_key in ['fingerling', 'post_fingerling', 'juvenile']
@@ -547,8 +556,11 @@ class FingerlingCounter:
     
     def _run_processing_loop(self) -> None:
         """Main processing loop."""
+        self.is_running = True
         self.is_processing = True
         self.stop_requested = False
+        self.start_time = time.time()
+        self.frame_count = 0
         
         for frame_data in self.video_processor.frames():
             if not self.is_running or self.stop_requested:

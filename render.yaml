@@ -28,7 +28,7 @@ services:
       - key: MODEL_PATH
         value: models/best.onnx
       - key: CONFIDENCE_THRESHOLD
-        value: "0.25"
+        value: "0.15"
       - key: PORT
         value: "10000"
       # Set RENDER_BACKEND_URL to your Render public URL so the frontend

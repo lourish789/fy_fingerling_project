@@ -393,10 +393,8 @@
       display: block;
       width: 100%;
       height: auto;
-      max-height: 480px;
+      max-height: 560px;
       object-fit: contain;
-      transform-origin: center center;
-      transition: transform 0.15s ease;
     }
     .live-badge {
       position: absolute;
@@ -435,75 +433,6 @@
       letter-spacing: 0.07em;
     }
     .status-val { color: var(--t2); font-weight: 500; }
-
-    /* ════════════════════════════════════════════════════════════════
-       ZOOM
-       ════════════════════════════════════════════════════════════════ */
-    .zoom-controls {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      padding: 10px 18px;
-      background: var(--surface);
-      border-top: 1px solid var(--border);
-    }
-    .zoom-label {
-      font-size: 0.68rem;
-      font-family: var(--mono);
-      color: var(--t3);
-      text-transform: uppercase;
-      letter-spacing: 0.07em;
-      white-space: nowrap;
-    }
-    .zoom-slider {
-      flex: 1;
-      -webkit-appearance: none;
-      height: 3px;
-      border-radius: 2px;
-      background: var(--border);
-      outline: none;
-      cursor: pointer;
-    }
-    .zoom-slider::-webkit-slider-thumb {
-      -webkit-appearance: none;
-      width: 16px;
-      height: 16px;
-      border-radius: 50%;
-      background: var(--accent);
-      cursor: pointer;
-      box-shadow: 0 0 8px var(--a-glow);
-      border: 2px solid var(--surface);
-    }
-    .zoom-slider::-moz-range-thumb {
-      width: 14px; height: 14px;
-      border: none; border-radius: 50%;
-      background: var(--accent); cursor: pointer;
-    }
-    .zoom-val-display {
-      font-size: 0.72rem;
-      font-family: var(--mono);
-      font-weight: 600;
-      color: var(--accent);
-      min-width: 38px;
-      text-align: right;
-    }
-    .zoom-presets { display: flex; gap: 4px; }
-    .zoom-preset-btn {
-      padding: 3px 9px;
-      border-radius: var(--r-xs);
-      border: 1px solid var(--border);
-      background: transparent;
-      color: var(--t3);
-      font-size: 0.68rem;
-      font-family: var(--mono);
-      cursor: pointer;
-      transition: var(--ease);
-    }
-    .zoom-preset-btn:hover, .zoom-preset-btn.active {
-      background: var(--a-dim);
-      border-color: var(--b-accent);
-      color: var(--accent);
-    }
 
     /* ════════════════════════════════════════════════════════════════
        TABS
@@ -972,18 +901,6 @@
           <div class="live-badge" id="live-badge">● LIVE</div>
         </div>
 
-        <!-- Zoom -->
-        <div class="zoom-controls">
-          <span class="zoom-label">🔍 Zoom</span>
-          <input class="zoom-slider" id="zoom-slider" type="range" min="1" max="4" step="0.1" value="1" />
-          <span class="zoom-val-display" id="zoom-val">1.0×</span>
-          <div class="zoom-presets">
-            <button class="zoom-preset-btn active" onclick="setZoom(1)">1×</button>
-            <button class="zoom-preset-btn" onclick="setZoom(2)">2×</button>
-            <button class="zoom-preset-btn" onclick="setZoom(4)">4×</button>
-          </div>
-        </div>
-
         <!-- Status Bar -->
         <div class="video-status-bar">
           <div class="status-item">
@@ -1152,7 +1069,7 @@
         </div>
         <div class="ref-item">
           <span class="ref-num">3</span>
-          <span>Use the zoom slider to magnify and verify size classification.</span>
+          <span>The annotated output (bounding boxes + IDs) stays visible after processing completes.</span>
         </div>
         <div class="ref-item">
           <span class="ref-num">4</span>
@@ -1184,7 +1101,7 @@ const urlParams = new URLSearchParams(window.location.search);
 const API_BASE = urlParams.get('backend') ||
   (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
     ? 'http://localhost:5000'
-    : 'https://aquacount-backend.onrender.com/');
+    : 'https://aquacount-backend.onrender.com');
 
 document.getElementById('footer-api-url').href = API_BASE;
 document.getElementById('footer-api-url').textContent = API_BASE.replace('https://', '').split('/')[0];
@@ -1199,7 +1116,6 @@ const socket = io(API_BASE, {
 
 // ─── State ─────────────────────────────────────────────────────────────────
 let isProcessing = false;
-let currentZoom = 1;
 let _frameIdleTimer = null;
 
 // ─── Chart ─────────────────────────────────────────────────────────────────
@@ -1295,8 +1211,15 @@ socket.on('processing_started', (data) => {
 socket.on('processing_completed', () => {
   isProcessing = false;
   // Keep the last annotated frame visible so users can review labelled output.
-  // Feed only hides on: counts_reset, processing_error, or disconnect.
+  // If no frame was ever shown (placeholder still up), reset to idle.
+  const img = document.getElementById('video-feed');
+  const hasFrame = img.src && img.src !== window.location.href && img.style.display !== 'none';
+  if (!hasFrame) setVideoActive(false);
   showStatus('Processing complete.', 'success');
+});
+socket.on('processing_stopped', () => {
+  isProcessing = false;
+  showStatus('Processing stopped.', 'success');
 });
 socket.on('processing_error', (data) => {
   isProcessing = false;
@@ -1309,6 +1232,19 @@ socket.on('counts_reset', () => {
   });
   updateChart({});
   setVideoActive(false);
+});
+socket.on('batch_file_processing', (data) => {
+  showStatus(`Analysing ${data.filename} (${data.index}/${data.total})…`, 'info');
+});
+socket.on('image_result', (data) => {
+  if (data.annotated_image_b64) {
+    const img = document.getElementById('video-feed');
+    const placeholder = document.getElementById('video-placeholder');
+    img.src = 'data:image/jpeg;base64,' + data.annotated_image_b64;
+    img.style.display = 'block';
+    placeholder.style.display = 'none';
+    clearTimeout(_frameIdleTimer);
+  }
 });
 socket.on('batch_results', renderBatchResults);
 socket.on('batch_csv_saved', (d) => showStatus('CSV saved: ' + d.csv_path, 'success'));
@@ -1362,27 +1298,6 @@ function setVideoActive(active) {
     placeholder.querySelector('.vp-text').textContent = 'No active source — select an input below';
     document.getElementById('live-badge').classList.remove('active');
   }
-}
-
-// ─── Zoom ────────────────────────────────────────────────────────────────────
-const zoomSlider = document.getElementById('zoom-slider');
-zoomSlider.addEventListener('input', () => {
-  applyZoom(parseFloat(zoomSlider.value));
-});
-
-function applyZoom(level) {
-  currentZoom = level;
-  const img = document.getElementById('video-feed');
-  img.style.transform = level === 1 ? 'none' : `scale(${level})`;
-  document.getElementById('zoom-val').textContent = level.toFixed(1) + '×';
-  document.querySelectorAll('.zoom-preset-btn').forEach(b => {
-    b.classList.toggle('active', parseFloat(b.textContent) === level);
-  });
-}
-
-function setZoom(level) {
-  zoomSlider.value = level;
-  applyZoom(level);
 }
 
 // ─── Tabs ────────────────────────────────────────────────────────────────────
