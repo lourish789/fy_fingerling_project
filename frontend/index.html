@@ -5,11 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>AquaCount — Catfish Fingerling Intelligence System</title>
 
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-
-  <!-- Local copies (Socket.IO 4.7.4, Chart.js 4.4.2) so the dashboard works offline at the hatchery -->
+  <!-- Local copies (Socket.IO 4.7.4, Chart.js 4.4.2) so the dashboard works completely offline at the hatchery -->
   <script src="vendor/socket.io.min.js"></script>
   <script src="vendor/chart.umd.min.js"></script>
   <script src="config.js"></script>
@@ -769,6 +765,78 @@
     }
 
     /* ════════════════════════════════════════════════════════════════
+       RECENT RUNS HISTORY
+       ════════════════════════════════════════════════════════════════ */
+    .runs-section { padding: 0 20px 18px; }
+    .runs-section .sec-head {
+      padding-top: 18px;
+      margin-top: 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .runs-refresh-btn {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--t2);
+      border-radius: var(--r-xs);
+      padding: 2px 8px;
+      font-size: 0.65rem;
+      font-family: var(--mono);
+      cursor: pointer;
+      transition: var(--ease);
+    }
+    .runs-refresh-btn:hover {
+      border-color: var(--b-accent);
+      color: var(--accent);
+    }
+    .runs-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      max-height: 240px;
+      overflow-y: auto;
+    }
+    .run-item {
+      background: var(--input-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--r-sm);
+      padding: 9px 11px;
+      font-size: 0.74rem;
+    }
+    .run-item-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 8px;
+    }
+    .run-item-id {
+      font-family: var(--mono);
+      font-size: 0.68rem;
+      color: var(--t2);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .run-item-total {
+      font-weight: 700;
+      color: var(--accent);
+      white-space: nowrap;
+    }
+    .run-item-meta {
+      font-size: 0.68rem;
+      color: var(--t3);
+      margin-top: 2px;
+    }
+    .run-item-links {
+      display: flex;
+      gap: 10px;
+      margin-top: 6px;
+      font-size: 0.7rem;
+      font-family: var(--mono);
+    }
+
+    /* ════════════════════════════════════════════════════════════════
        QUICK REFERENCE
        ════════════════════════════════════════════════════════════════ */
     .ref-section { padding: 0 20px 22px; border-top: 1px solid var(--border); }
@@ -1093,6 +1161,19 @@
 
       <div class="divider"></div>
 
+      <!-- Recent Runs History -->
+      <div class="runs-section">
+        <div class="sec-head">
+          <span>🗂 Recent Runs</span>
+          <button class="runs-refresh-btn" onclick="loadRecentRuns()">↻ Refresh</button>
+        </div>
+        <div class="runs-list" id="runs-list">
+          <div class="batch-empty">No saved runs yet.</div>
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
       <!-- Quick Reference -->
       <div class="ref-section">
         <div class="sec-head">📖 Quick Reference</div>
@@ -1213,6 +1294,7 @@ socket.on('connect', () => {
   const badge = document.getElementById('conn-badge');
   badge.classList.remove('disconnected');
   document.getElementById('conn-label').textContent = 'Connected';
+  loadRecentRuns();
 });
 
 socket.on('disconnect', () => {
@@ -1292,6 +1374,7 @@ socket.on('batch_csv_saved', (d) => {
     title: 'Batch images',
     links: { 'Batch summary (CSV)': d.url },
   });
+  loadRecentRuns();
 });
 socket.on('run_saved', (d) => {
   const c = d.counts || {};
@@ -1314,7 +1397,79 @@ socket.on('run_saved', (d) => {
       'Summary (JSON)': d.links.summary_json,
     },
   });
+  loadRecentRuns();
 });
+
+function escapeHtml(str) {
+  return String(str ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function loadRecentRuns() {
+  const container = document.getElementById('runs-list');
+  if (!container) return;
+  fetch(API_BASE + '/api/runs')
+    .then(r => r.json())
+    .then(data => {
+      const runs = (data && data.runs) ? data.runs.slice(0, 12) : [];
+      if (!runs.length) {
+        container.innerHTML = '<div class="batch-empty">No saved runs yet.</div>';
+        return;
+      }
+      container.replaceChildren();
+      runs.forEach(run => {
+        const item = document.createElement('div');
+        item.className = 'run-item';
+
+        const top = document.createElement('div');
+        top.className = 'run-item-top';
+        const idSpan = document.createElement('span');
+        idSpan.className = 'run-item-id';
+        idSpan.title = run.run_id || '';
+        idSpan.textContent = run.run_id || 'unknown';
+        const totSpan = document.createElement('span');
+        totSpan.className = 'run-item-total';
+        const c = run.counts || {};
+        totSpan.textContent = (c.total != null ? c.total : '—') + ' fish';
+        top.appendChild(idSpan);
+        top.appendChild(totSpan);
+        item.appendChild(top);
+
+        const meta = document.createElement('div');
+        meta.className = 'run-item-meta';
+        const statusTxt = run.status || 'saved';
+        const calTxt = run.corrected_total != null ? ` · cal ${run.corrected_total}` : '';
+        meta.textContent = `${statusTxt}${calTxt}`;
+        item.appendChild(meta);
+
+        if (run.run_id && run.files) {
+          const links = document.createElement('div');
+          links.className = 'run-item-links';
+          const base = `${API_BASE}/api/runs/${encodeURIComponent(run.run_id)}/`;
+          [
+            ['Report', base + 'report.html'],
+            ['CSV', base + 'events.csv?download=1'],
+            ['JSON', base + 'summary.json?download=1'],
+          ].forEach(([lbl, href]) => {
+            const a = document.createElement('a');
+            a.href = href;
+            a.target = '_blank';
+            a.rel = 'noopener';
+            a.textContent = lbl;
+            links.appendChild(a);
+          });
+          item.appendChild(links);
+        }
+
+        container.appendChild(item);
+      });
+    })
+    .catch(() => {});
+}
 
 function showRunPanel(info) {
   document.getElementById('run-panel').classList.add('active');
@@ -1513,11 +1668,12 @@ function renderBatchResults(data) {
 
   (data.results || []).forEach(r => {
     const ok = r.status === 'success';
+    const safeName = escapeHtml(r.filename);
     html += `<div class="batch-result-item ${ok ? 'success' : 'error'}">
-      <div class="batch-result-name ${ok ? 'success' : 'error'}">${ok ? '✓' : '✗'} ${r.filename}</div>`;
+      <div class="batch-result-name ${ok ? 'success' : 'error'}">${ok ? '✓' : '✗'} ${safeName}</div>`;
     if (ok) {
       if (r.annotated_image) {
-        html += `<img class="batch-result-img" src="data:image/jpeg;base64,${r.annotated_image}" alt="${r.filename}" />`;
+        html += `<img class="batch-result-img" src="data:image/jpeg;base64,${r.annotated_image}" alt="${safeName}" />`;
       }
       const c = r.counts || {};
       html += `<div class="batch-counts-grid">
@@ -1528,10 +1684,10 @@ function renderBatchResults(data) {
         <span>Unknown</span><span style="color:var(--text-muted);font-weight:700">${c.unknown||0}</span>
       </div>`;
       if (r.label_summary) {
-        html += `<div class="batch-summary-text">${r.label_summary}</div>`;
+        html += `<div class="batch-summary-text">${escapeHtml(r.label_summary)}</div>`;
       }
     } else {
-      html += `<div style="color:var(--danger);font-size:0.75rem;">${r.error || 'Processing failed.'}</div>`;
+      html += `<div style="color:var(--danger);font-size:0.75rem;">${escapeHtml(r.error || 'Processing failed.')}</div>`;
     }
     html += `</div>`;
   });

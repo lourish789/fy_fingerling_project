@@ -13,31 +13,34 @@
 - Module: `src/video/processor.py`
 
 2. Inference Layer
-- Loads model engine and runs detection.
-- Modules: `src/models/detector.py`
+- Loads model engine and runs detection (with optional channel ROI cropping via `video.roi`).
+- Modules: `src/models/detector.py` (PyTorch/Ultralytics dev runtime) and `src/models/onnx_detector.py` (CPU-only ONNX Runtime production engine).
 - Engine strategy:
-  - `ultralytics` + checkpoint weights
-  - YOLOv26 checkpoints are supported by configuration when available.
+  - `onnxruntime` for production/hatchery laptops (`models/best.onnx`)
+  - `ultralytics` + checkpoint weights for training/local dev (YOLOv26-ready fallback)
 
 3. Tracking and Counting Layer
-- Associates detections across frames.
-- Counts on line-crossing logic.
+- Associates detections across frames via centroid-distance Hungarian assignment (`max_distance=160 px`) with 2-point constant-velocity prediction.
+- Counts on direction-gated line-crossing logic (`y = 0.50`, downstream only) with `sides_seen` tracking and majority-vote class assignment.
 - Module: `src/models/tracker.py`
 
-4. Annotation and Visualization Layer
-- Draws boxes, IDs, class labels, and summary overlays.
+4. Audit Trail & Calibration Layer
+- Records per-fish counting events (`events.csv`), cropped thumbnails (`crops/`), machine-readable run metadata (`summary.json` with SHA-256 model fingerprint), and printable batch reports (`report.html`).
+- Modules: `src/app/run_log.py`, `scripts/calibrate.py`
+
+5. Annotation and Visualization Layer
+- Draws thin boxes, track IDs, directional counting line arrows, optional channel ROI frame, and compact count overlays.
 - Module: `src/video/visualization.py`
 
-5. Serving Layer (Backend)
-- REST endpoints for upload, URL processing, camera start/stop.
-- WebSocket stream for live counters + status.
-- MJPEG video feed endpoint.
-- Module: `src/streaming/server.py`
+6. Serving Layer (Backend)
+- REST endpoints for upload, batch upload, URL processing (with SSRF guard), camera start/stop, reset, and `/api/runs` history/downloads.
+- Socket.IO stream for live frames, counters, status, and run notifications; MJPEG `/video_feed` endpoint for local/same-origin use.
+- Modules: `src/streaming/server.py`, `src/streaming/wsgi.py`
 
-6. Web UI Layer (Frontend)
-- Single-page dashboard embedded in backend template.
-- Live video, class counts, chart, controls for source selection.
-- Module: `src/streaming/server.py` (embedded HTML/JS)
+7. Web UI Layer (Frontend)
+- Single-page offline-ready dashboard served directly by the backend (or via Vercel for cloud demo), using locally vendored Socket.IO and Chart.js (`frontend/vendor/`).
+- Live video feed, per-class counts, distribution chart, batch gallery, recent runs history, and source controls.
+- Files: `frontend/index.html`, `frontend/config.js`
 
 7. Training Layer
 - Dataset preparation from COCO zip to YOLO labels.

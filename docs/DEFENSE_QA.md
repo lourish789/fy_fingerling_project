@@ -8,15 +8,17 @@ Answers are grounded in the repository as it stands on `dev` (`20af01e`): the sh
 in the manuscript prose. Where the two disagree, the disagreement is flagged **⚠ TRAP** and the
 safe answer is given. See `docs/MANUSCRIPT_REVIEW.md` for the underlying evidence.
 
-> **Status update — 2026-11-05.** Four of the code/paper gaps below have now been **fixed in the
+> **Status update — 2026-11-23.** Five of the code/paper gaps below have now been **fixed in the
 > repository**: `config.yaml` ships the validated settings (`line_crossing`, conf 0.50, NMS IoU
 > 0.50, min_hits 3, count_min_hits 3), the downstream direction gate is implemented, class
-> assignment is a majority vote over the track, and the CSV header bug is corrected. The ⚠ TRAP
-> entries for C7, D2, D3 and J3 therefore describe *history* — what the paper claimed versus what
-> the code did when the manuscript was written. The honest line is now: *"the paper described the
-> intended method, the shipped configuration had drifted from it, and the configuration has been
-> corrected to match."* Still outstanding: the per-fish event log (D6) and background images (B6).
-> A measured before/after on the field footage is in `docs/CONFIG_FIX_RESULTS.md`.
+> assignment is a majority vote over the track, the CSV header bug is corrected, and the per-fish
+> audit trail (`src/app/run_log.py` → `events.csv`, `crops/`, `summary.json`, `report.html`, D6) is
+> implemented and tested. The ⚠ TRAP entries for C7, D2, D3, D6 and J3 therefore describe *history*
+> — what the paper claimed versus what the code did when the manuscript was written. The honest line
+> is now: *"the paper described the intended method, the shipped configuration had drifted from it,
+> and the implementation has been corrected and verified to match."* Still outstanding: retraining
+> with background/negative images (B6). A measured before/after on the field footage is in
+> `docs/CONFIG_FIX_RESULTS.md`.
 
 ---
 

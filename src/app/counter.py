@@ -176,7 +176,9 @@ class FingerlingCounter:
             self.detector = OnnxFingerlingDetector(
                 weights,
                 confidence_threshold=model_config.get('confidence_threshold', 0.5),
-                iou_threshold=model_config.get('iou_threshold', 0.45),
+                iou_threshold=model_config.get('iou_threshold', 0.5),
+                num_threads=model_config.get('onnx_threads'),
+                size_consistency_enabled=bool(model_config.get('size_consistency_enabled', False)),
             )
         else:
             try:
@@ -317,6 +319,7 @@ class FingerlingCounter:
             'min_hits': self.tracker.min_hits,
             'max_distance_px': self.tracker.max_distance,
             'max_age_frames': tracking_config.get('max_age', 30),
+            'roi': self.config.get('video', {}).get('roi'),
         }
 
     def _start_run_record(self) -> Optional[RunRecorder]:
@@ -476,6 +479,49 @@ class FingerlingCounter:
             self.counting_line = None
             self.counting_line_orientation = 'horizontal'
     
+    def _resolve_roi(self, frame_w: int, frame_h: int) -> Optional[tuple]:
+        """Resolve configured video.roi (relative 0-1 or pixel [x1, y1, x2, y2]) to pixel coords."""
+        raw = self.config.get('video', {}).get('roi')
+        if not raw or len(raw) != 4:
+            return None
+        try:
+            vals = [float(v) for v in raw]
+        except (TypeError, ValueError):
+            return None
+        # Treat all values <= 1.0 as relative fractions of frame size
+        if all(0.0 <= v <= 1.0 for v in vals):
+            x1, y1 = int(round(vals[0] * frame_w)), int(round(vals[1] * frame_h))
+            x2, y2 = int(round(vals[2] * frame_w)), int(round(vals[3] * frame_h))
+        else:
+            x1, y1, x2, y2 = (int(round(v)) for v in vals)
+        x1 = max(0, min(x1, frame_w - 1))
+        y1 = max(0, min(y1, frame_h - 1))
+        x2 = max(x1 + 1, min(x2, frame_w))
+        y2 = max(y1 + 1, min(y2, frame_h))
+        if x1 == 0 and y1 == 0 and x2 == frame_w and y2 == frame_h:
+            return None
+        return (x1, y1, x2, y2)
+
+    def _detect_with_roi(self, frame: np.ndarray) -> List[Dict[str, Any]]:
+        """Run detector on configured channel ROI (if any) and map boxes back to full frame."""
+        frame_h, frame_w = frame.shape[:2]
+        roi = self._resolve_roi(frame_w, frame_h)
+        if roi is None:
+            return self.detector.detect(frame)
+
+        rx1, ry1, rx2, ry2 = roi
+        cropped = frame[ry1:ry2, rx1:rx2]
+        detections = self.detector.detect(cropped)
+        mapped: List[Dict[str, Any]] = []
+        for det in detections:
+            d = dict(det)
+            bx1, by1, bx2, by2 = d['bbox']
+            d['bbox'] = [bx1 + rx1, by1 + ry1, bx2 + rx1, by2 + ry1]
+            cx, cy = d['center']
+            d['center'] = (cx + rx1, cy + ry1)
+            mapped.append(d)
+        return mapped
+
     def process_frame(self, frame: np.ndarray) -> Dict[str, Any]:
         """
         Process a single frame through the pipeline.
@@ -486,8 +532,8 @@ class FingerlingCounter:
         Returns:
             Processing results dictionary.
         """
-        # Detect fingerlings
-        detections = self.detector.detect(frame)
+        # Detect fingerlings (optionally masked to configured channel ROI)
+        detections = self._detect_with_roi(frame)
         
         # Update tracker
         tracks = self.tracker.update(detections)
@@ -522,7 +568,7 @@ class FingerlingCounter:
             Processing results dictionary.
         """
         # Detect fingerlings
-        detections = self.detector.detect(image)
+        detections = self._detect_with_roi(image)
         
         # Get class distribution
         size_dist: Dict[str, int] = {}
@@ -738,12 +784,15 @@ class FingerlingCounter:
             recorder.record(new_events, frame, video_time)
 
         # Always produce an annotated frame for viewers (boxes + labels).
+        frame_h, frame_w = frame.shape[:2]
         annotated_frame = self.visualizer.draw_all(
             frame,
             detections=results['detections'],
             tracks=results['tracks'],
             counting_line=self.counting_line,
             counting_line_orientation=self.counting_line_orientation,
+            count_direction=self.tracker.count_direction,
+            roi=self._resolve_roi(frame_w, frame_h),
             stats=results['stats']
         )
 

@@ -130,7 +130,8 @@ class Visualizer:
         self,
         frame: np.ndarray,
         line: Tuple[int, int, int, int],
-        orientation: str = "horizontal"
+        orientation: str = "horizontal",
+        count_direction: str = "any"
     ) -> np.ndarray:
         annotated = frame.copy()
         x1, y1, x2, y2 = line
@@ -139,20 +140,36 @@ class Visualizer:
         cv2.line(annotated, (x1, y1), (x2, y2), (0, 0, 0), 3, cv2.LINE_AA)
         cv2.line(annotated, (x1, y1), (x2, y2), (0, 210, 255), 1, cv2.LINE_AA)
 
-        # Direction arrows
+        # Direction arrow(s) matching the configured count_direction
         mid_x = (x1 + x2) // 2
         mid_y = (y1 + y2) // 2
+        direction = (count_direction or "any").lower()
         if orientation == "horizontal":
-            cv2.arrowedLine(annotated, (mid_x, mid_y), (mid_x, mid_y - 16),
-                            (0, 210, 255), 1, tipLength=0.4)
-            cv2.arrowedLine(annotated, (mid_x, mid_y), (mid_x, mid_y + 16),
-                            (0, 210, 255), 1, tipLength=0.4)
+            if direction in ("up", "any"):
+                cv2.arrowedLine(annotated, (mid_x, mid_y), (mid_x, mid_y - 20),
+                                (0, 210, 255), 2, tipLength=0.4)
+            if direction in ("down", "any"):
+                cv2.arrowedLine(annotated, (mid_x, mid_y), (mid_x, mid_y + 20),
+                                (0, 210, 255), 2, tipLength=0.4)
         else:
-            cv2.arrowedLine(annotated, (mid_x, mid_y), (mid_x - 16, mid_y),
-                            (0, 210, 255), 1, tipLength=0.4)
-            cv2.arrowedLine(annotated, (mid_x, mid_y), (mid_x + 16, mid_y),
-                            (0, 210, 255), 1, tipLength=0.4)
+            if direction in ("left", "any"):
+                cv2.arrowedLine(annotated, (mid_x, mid_y), (mid_x - 20, mid_y),
+                                (0, 210, 255), 2, tipLength=0.4)
+            if direction in ("right", "any"):
+                cv2.arrowedLine(annotated, (mid_x, mid_y), (mid_x + 20, mid_y),
+                                (0, 210, 255), 2, tipLength=0.4)
 
+        return annotated
+
+    # ─── Channel ROI ───────────────────────────────────────────────────────
+    def draw_roi(
+        self,
+        frame: np.ndarray,
+        roi: Tuple[int, int, int, int]
+    ) -> np.ndarray:
+        annotated = frame.copy()
+        x1, y1, x2, y2 = roi
+        cv2.rectangle(annotated, (x1, y1), (x2, y2), (255, 200, 0), 1, cv2.LINE_AA)
         return annotated
 
     # ─── Statistics Overlay ────────────────────────────────────────────────
@@ -223,13 +240,18 @@ class Visualizer:
         tracks: Optional[List[Any]] = None,
         counting_line: Optional[Tuple[int, int, int, int]] = None,
         counting_line_orientation: str = "horizontal",
+        count_direction: str = "any",
+        roi: Optional[Tuple[int, int, int, int]] = None,
         stats: Optional[Dict[str, Any]] = None
     ) -> np.ndarray:
         annotated = frame.copy()
 
+        if roi:
+            annotated = self.draw_roi(annotated, roi)
+
         if self.config.show_counting_line and counting_line:
             annotated = self.draw_counting_line(
-                annotated, counting_line, counting_line_orientation)
+                annotated, counting_line, counting_line_orientation, count_direction)
 
         if tracks and self.config.show_bounding_boxes:
             annotated = self.draw_tracks(annotated, tracks)

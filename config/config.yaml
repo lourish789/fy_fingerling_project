@@ -9,6 +9,8 @@ model:
   confidence_threshold: 0.50
   iou_threshold: 0.50
   device: "auto"  # "auto", "cuda", "cpu"
+  onnx_threads: null  # null = auto (2-4 CPU threads); set an integer to override
+  size_consistency_enabled: false  # Keep false for PyTorch/ONNX metric parity
   dark_surface_filter:
     enabled: false
     min_value_mean: 45
@@ -40,6 +42,10 @@ video:
   frame_height: null  # Preserve source height unless explicitly overridden
   fps: 30
   buffer_size: 10
+  # Optional channel ROI mask: [x1, y1, x2, y2] in either relative 0.0-1.0 coords
+  # (e.g. [0.20, 0.05, 0.80, 0.95]) or pixel coords. Only this region is fed to
+  # the detector, blocking out-of-channel false positives and improving recall.
+  roi: null
 
 # Tracking Settings
 tracking:

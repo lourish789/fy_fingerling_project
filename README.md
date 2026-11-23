@@ -65,9 +65,9 @@
 
 | Choice | Reason |
 |---|---|
-| ONNX Runtime instead of PyTorch | PyTorch ≈ 1.8 GB; ONNX Runtime ≈ 150 MB — fits Render's 512 MB RAM |
-| Eventlet worker in Gunicorn | Flask-SocketIO requires async worker for concurrent WebSocket + HTTP |
-| Vercel for static frontend | Single HTML file — zero build step, instant global CDN delivery |
+| ONNX Runtime instead of PyTorch | PyTorch ≈ 1.8 GB; ONNX Runtime ≈ 150 MB — fits Render's 512 MB RAM and lightweight hatchery laptops |
+| `gthread` worker in Gunicorn | Built-in threaded worker pairs cleanly with Flask-SocketIO `async_mode='threading'` (no `eventlet` needed) |
+| Vendored frontend libraries | Socket.IO and Chart.js live in `frontend/vendor/` so the hatchery dashboard works 100% offline |
 | Socket.IO polling transport | Works through Render's reverse proxy without WebSocket upgrade issues |
 | Thin bounding boxes (1 px) | Discrete overlays that don't obscure the fish being examined |
 | Stats overlay = counts only | Frame number, FPS, and telemetry removed from video; shown in dashboard |
@@ -213,7 +213,7 @@ The script:
 |---|---|
 | Runtime | Python 3 |
 | Build Command | `pip install -r requirements-prod.txt` |
-| Start Command | `gunicorn --worker-class eventlet --workers 1 --bind 0.0.0.0:$PORT --timeout 120 "src.streaming.wsgi:app"` |
+| Start Command | `gunicorn --worker-class gthread --workers 1 --threads 4 --bind 0.0.0.0:$PORT --timeout 120 "src.streaming.wsgi:app"` |
 | Health Check Path | `/api/status` |
 | Plan | Free |
 
@@ -339,7 +339,7 @@ Only one job runs at a time. Starting a job while one is running returns
 |---|---|
 | Build cost | Zero — single static HTML, no npm, no bundler |
 | CDN latency | Vercel edge delivers the file from the nearest PoP |
-| JS dependency size | Chart.js and Socket.io loaded from CDN (cached by browser) |
+| JS dependency size | Socket.IO and Chart.js are vendored locally in `frontend/vendor/` (offline-ready, zero external CDN dependencies) |
 
 ---
 

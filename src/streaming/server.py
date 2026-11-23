@@ -9,6 +9,7 @@ import json
 import time
 import threading
 import base64
+import ipaddress
 import os
 import re
 import shutil
@@ -19,12 +20,13 @@ from dataclasses import dataclass, asdict
 from datetime import datetime
 from queue import Queue, Empty
 from pathlib import Path
+from urllib.parse import urlparse
 
 import cv2
 import numpy as np
 
 try:
-    from flask import Flask, Response, render_template_string, jsonify, request, send_from_directory
+    from flask import Flask, Response, jsonify, request, send_from_directory
     from flask_cors import CORS
     from flask_socketio import SocketIO, emit
     from werkzeug.utils import secure_filename
@@ -36,6 +38,40 @@ except ImportError:
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FRONTEND_DIR = REPO_ROOT / 'frontend'
 RUN_ID_PATTERN = re.compile(r'^[A-Za-z0-9_-]{1,120}$')
+
+
+def is_safe_media_url(url: str) -> tuple[bool, str]:
+    """Validate media URL scheme and reject loopback / cloud-metadata SSRF targets.
+
+    RFC1918 LAN addresses (e.g. 192.168.x.x phone IP-camera apps on hatchery Wi-Fi)
+    are intentionally allowed. Set ALLOW_LOCAL_URLS=1 to allow loopback for local tests.
+    """
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return False, 'Malformed URL'
+
+    if parsed.scheme.lower() not in ('http', 'https', 'rtsp', 'rtmp'):
+        return False, 'URL must start with http(s)://, rtsp:// or rtmp://'
+
+    host = (parsed.hostname or '').strip().lower()
+    if not host:
+        return False, 'URL is missing a hostname'
+
+    if os.environ.get('ALLOW_LOCAL_URLS') == '1':
+        return True, ''
+
+    if host in ('localhost', 'localhost.localdomain') or host.endswith('.localhost'):
+        return False, 'Loopback URLs are not allowed'
+
+    try:
+        ip = ipaddress.ip_address(host)
+        if ip.is_loopback or ip.is_link_local or ip.is_unspecified or ip.is_multicast:
+            return False, 'Loopback and link-local/metadata addresses are not allowed'
+    except ValueError:
+        pass  # domain name, not an IP literal
+
+    return True, ''
 
 
 @dataclass
@@ -113,14 +149,17 @@ class StreamingServer:
         # which was stopped and replaced does not report "completed" over it.
         self._job_state_lock = threading.Lock()
         self._job_seq = 0
+        self._worker_thread: Optional[threading.Thread] = None
 
         # Flask app
         self.app = Flask(__name__)
-        CORS(self.app, resources={r"/*": {"origins": "*"}})
-        self.app.config['SECRET_KEY'] = 'fingerling_counter_secret'
+        cors_env = os.environ.get('CORS_ORIGINS', '*').strip()
+        cors_origins = '*' if cors_env == '*' else [o.strip() for o in cors_env.split(',') if o.strip()]
+        CORS(self.app, resources={r"/*": {"origins": cors_origins}})
+        self.app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY') or os.urandom(24).hex()
         self.app.config['UPLOAD_FOLDER'] = self.upload_folder
         self.app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500MB max
-        self.socketio = SocketIO(self.app, cors_allowed_origins="*", async_mode='threading')
+        self.socketio = SocketIO(self.app, cors_allowed_origins=cors_origins, async_mode='threading')
         
         # State
         self.current_frame: Optional[np.ndarray] = None
@@ -307,8 +346,9 @@ class StreamingServer:
                 return jsonify({'error': 'No URL provided'}), 400
             
             url = str(data['url']).strip()
-            if not re.match(r'^(https?|rtsp|rtmp)://', url, re.IGNORECASE):
-                return jsonify({'error': 'URL must start with http(s)://, rtsp:// or rtmp://'}), 400
+            url_ok, url_err = is_safe_media_url(url)
+            if not url_ok:
+                return jsonify({'error': url_err}), 400
             if not self.process_callback:
                 return jsonify({'error': 'Server is not accepting jobs'}), 503
             if not self._start_job('url', url, self.process_callback, (url,)):
@@ -342,12 +382,20 @@ class StreamingServer:
         
         @self.app.route('/api/stop', methods=['POST'])
         def stop_processing():
-            """Stop current processing."""
-            self.is_processing = False
+            """Signal active processing to stop cleanly.
+
+            Do not clear `is_processing` while the worker thread is still wrapping
+            up its current frame and saving the run record; the worker's `finally`
+            block clears `is_processing` once teardown is complete.
+            """
+            with self._job_state_lock:
+                worker_alive = bool(self._worker_thread and self._worker_thread.is_alive())
+                if not worker_alive:
+                    self.is_processing = False
             if self.stop_callback:
                 self.stop_callback()
             self.socketio.emit('processing_stopped', {})
-            return jsonify({'success': True, 'message': 'Processing stopped.'})
+            return jsonify({'success': True, 'message': 'Stop requested.' if worker_alive else 'Processing stopped.'})
         
         @self.app.route('/api/reset_counts', methods=['POST'])
         def reset_counts():
@@ -421,10 +469,14 @@ class StreamingServer:
                     is_latest = job == self._job_seq
                     if is_latest:
                         self.is_processing = False
+                        self._worker_thread = None
                 if is_latest:
                     self.socketio.emit('processing_completed', {'job': job})
 
-        threading.Thread(target=runner, daemon=True).start()
+        thread = threading.Thread(target=runner, daemon=True)
+        with self._job_state_lock:
+            self._worker_thread = thread
+        thread.start()
         return True
 
     def notify_run_saved(self, summary: Dict[str, Any]) -> None:
@@ -521,11 +573,14 @@ class StreamingServer:
                 if counts_by_class.get('unknown', 0) > 0:
                     label_summary_parts.append(f"Unknown: {counts_by_class['unknown']}")
                 
+                raw_detections = result_data.get('detections', 0)
+                detection_count = len(raw_detections) if isinstance(raw_detections, list) else int(raw_detections or 0)
+
                 self.batch_results.append({
                     'filename': file_info['filename'],
                     'status': 'success',
                     'counts': counts_by_class,
-                    'detections': result_data.get('detections', 0),
+                    'detections': detection_count,
                     'label_summary': ', '.join(label_summary_parts) if label_summary_parts else 'No detections',
                     'annotated_image': image_base64
                 })
@@ -852,615 +907,3 @@ class CSVLogger:
             )
 
 
-# HTML template for web dashboard
-DASHBOARD_HTML = """
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Fingerling Counter Dashboard</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
-    <!-- Chart.js removed -->
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-            color: #fff;
-            min-height: 100vh;
-            padding: 20px;
-        }
-        .header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
-        }
-        .dashboard {
-            display: grid;
-            grid-template-columns: 2fr 1fr;
-            gap: 20px;
-            max-width: 1600px;
-            margin: 0 auto;
-        }
-        .card {
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 15px;
-            padding: 20px;
-            backdrop-filter: blur(10px);
-        }
-        h1 {
-            font-size: 2em;
-            color: #00d4ff;
-        }
-        h2 {
-            margin-bottom: 15px;
-            color: #00d4ff;
-        }
-        .video-container {
-            border-radius: 10px;
-            overflow: hidden;
-            position: relative;
-        }
-        .video-container img {
-            width: 100%;
-            border-radius: 10px;
-        }
-        .live-indicator {
-            position: absolute;
-            top: 10px;
-            right: 10px;
-            background: #ff0000;
-            padding: 5px 10px;
-            border-radius: 5px;
-            font-size: 0.8em;
-            animation: pulse 1s infinite;
-            display: none;
-        }
-        .live-indicator.active {
-            display: block;
-        }
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 15px;
-        }
-        .stat-box {
-            background: rgba(0, 212, 255, 0.1);
-            padding: 20px;
-            border-radius: 10px;
-            text-align: center;
-            border: 1px solid rgba(0, 212, 255, 0.3);
-        }
-        .stat-value {
-            font-size: 2.5em;
-            font-weight: bold;
-        }
-        .stat-label {
-            font-size: 0.9em;
-            color: #aaa;
-            margin-top: 5px;
-        }
-        .fingerling { color: #00ff00; }
-        .post-fingerling { color: #ffbf00; }
-        .juvenile { color: #ffa500; }
-        .unknown { color: #a0a0a0; }
-        .total { color: #00d4ff; }
-        /* Chart UI removed per user request */
-        .status-bar {
-            display: flex;
-            justify-content: space-between;
-            margin-top: 10px;
-            padding: 10px;
-            background: rgba(0, 0, 0, 0.3);
-            border-radius: 5px;
-            font-size: 0.9em;
-        }
-        .upload-section {
-            margin-top: 20px;
-        }
-        .input-group {
-            margin-bottom: 15px;
-        }
-        .input-group label {
-            display: block;
-            margin-bottom: 5px;
-            color: #aaa;
-        }
-        .input-group input[type="text"],
-        .input-group input[type="file"] {
-            width: 100%;
-            padding: 10px;
-            border: 1px solid rgba(0, 212, 255, 0.3);
-            border-radius: 5px;
-            background: rgba(0, 0, 0, 0.3);
-            color: #fff;
-        }
-        .input-group input[type="file"] {
-            cursor: pointer;
-        }
-        .btn {
-            padding: 10px 20px;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 1em;
-            margin-right: 10px;
-            margin-bottom: 10px;
-            transition: all 0.3s;
-        }
-        .btn-primary {
-            background: #00d4ff;
-            color: #000;
-        }
-        .btn-primary:hover {
-            background: #00a8cc;
-        }
-        .btn-success {
-            background: #00ff00;
-            color: #000;
-        }
-        .btn-danger {
-            background: #ff4444;
-            color: #fff;
-        }
-        .btn-secondary {
-            background: rgba(255, 255, 255, 0.2);
-            color: #fff;
-        }
-        .btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-        .button-group {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-        }
-        .processing-status {
-            padding: 10px;
-            border-radius: 5px;
-            margin-top: 10px;
-            display: none;
-        }
-        .processing-status.active {
-            display: block;
-            background: rgba(0, 212, 255, 0.2);
-            animation: pulse 2s infinite;
-        }
-        .processing-status.error {
-            display: block;
-            background: rgba(255, 0, 0, 0.2);
-        }
-        .processing-status.success {
-            display: block;
-            background: rgba(0, 255, 0, 0.2);
-        }
-        .tabs {
-            display: flex;
-            margin-bottom: 15px;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.2);
-        }
-        .tab {
-            padding: 10px 20px;
-            cursor: pointer;
-            border-bottom: 2px solid transparent;
-            transition: all 0.3s;
-        }
-        .tab.active {
-            color: #00d4ff;
-            border-bottom-color: #00d4ff;
-        }
-        .tab-content {
-            display: none;
-        }
-        .tab-content.active {
-            display: block;
-        }
-        .source-info {
-            font-size: 0.8em;
-            color: #888;
-            margin-top: 5px;
-        }
-        @media (max-width: 1200px) {
-            .dashboard {
-                grid-template-columns: 1fr;
-            }
-        }
-    </style>
-</head>
-<body>
-    <div class="header">
-        <h1>🐟 Catfish Fingerling Counter</h1>
-        <div>
-            <span id="connection-status" style="color: #00ff00;">● Connected</span>
-        </div>
-    </div>
-    
-    <div class="dashboard">
-        <div>
-            <div class="card">
-                <h2>Live Video Feed</h2>
-                <div class="video-container">
-                    <img alt="Video Feed" id="video-feed">
-                    <div class="live-indicator" id="live-indicator">🔴 LIVE</div>
-                </div>
-                <div class="status-bar">
-                    <span>Frame: <span id="frame">0</span></span>
-                    <span>FPS: <span id="fps">0</span></span>
-                    <span>Source: <span id="source-type">-</span></span>
-                    <span id="timestamp"></span>
-                </div>
-            </div>
-            
-            <div class="card upload-section">
-                <h2>Input Source</h2>
-                <div class="tabs">
-                    <div class="tab active" data-tab="camera">Camera</div>
-                    <div class="tab" data-tab="upload">Upload File</div>
-                    <div class="tab" data-tab="batch">Batch Images</div>
-                    <div class="tab" data-tab="url">Video URL</div>
-                </div>
-                
-                <div class="tab-content active" id="tab-camera">
-                    <div class="input-group">
-                        <label>Camera Index (0 = default webcam)</label>
-                        <input type="text" id="camera-index" value="0" placeholder="0">
-                    </div>
-                    <button class="btn btn-success" onclick="startCamera()">📷 Start Camera</button>
-                </div>
-                
-                <div class="tab-content" id="tab-upload">
-                    <div class="input-group">
-                        <label>Upload Video or Image</label>
-                        <input type="file" id="file-input" accept="video/*,image/*">
-                    </div>
-                    <button class="btn btn-primary" onclick="uploadFile()">📤 Upload & Process</button>
-                </div>
-                
-                <div class="tab-content" id="tab-batch">
-                    <div class="input-group">
-                        <label>Upload Multiple Images for Batch Analysis</label>
-                        <input type="file" id="batch-file-input" accept="image/*" multiple>
-                    </div>
-                    <div style="font-size: 0.85em; color: #888; margin-bottom: 15px;">
-                        Select multiple image files to process. Results will show annotated images with detailed counts per class.
-                    </div>
-                    <button class="btn btn-primary" onclick="uploadBatch()">📁 Upload & Analyze</button>
-                    <div id="batch-progress" style="margin-top: 10px; display: none;">
-                        <div style="font-size: 0.9em; color: #00d4ff;">Files processed: <span id="batch-count">0</span></div>
-                        <div id="batch-results-list" style="max-height: 600px; overflow-y: auto; margin-top: 10px; font-size: 0.85em;"></div>
-                    </div>
-                </div>
-                
-                <div class="tab-content" id="tab-url">
-                    <div class="input-group">
-                        <label>Video URL (YouTube, direct link, RTSP)</label>
-                        <input type="text" id="url-input" placeholder="https://www.youtube.com/watch?v=...">
-                    </div>
-                    <button class="btn btn-primary" onclick="processUrl()">🔗 Process URL</button>
-                </div>
-                
-                <div class="button-group" style="margin-top: 15px;">
-                    <button class="btn btn-danger" onclick="stopProcessing()">⏹ Stop</button>
-                    <button class="btn btn-secondary" onclick="resetCounts()">🔄 Reset Counts</button>
-                </div>
-                
-                <div class="processing-status" id="processing-status">
-                    <span id="status-message">Processing...</span>
-                </div>
-            </div>
-        </div>
-        
-        <div>
-            <div class="card">
-                <h2>Count Summary</h2>
-                <div class="stats-grid">
-                    <div class="stat-box">
-                        <div class="stat-value total" id="total">0</div>
-                        <div class="stat-label">Total Counted</div>
-                    </div>
-                    <div class="stat-box">
-                        <div class="stat-value fingerling" id="fingerling">0</div>
-                        <div class="stat-label">Fingerling</div>
-                    </div>
-                    <div class="stat-box">
-                        <div class="stat-value post-fingerling" id="post_fingerling">0</div>
-                        <div class="stat-label">Post-Fingerling</div>
-                    </div>
-                    <div class="stat-box">
-                        <div class="stat-value juvenile" id="juvenile">0</div>
-                        <div class="stat-label">Juvenile</div>
-                    </div>
-                    <div class="stat-box">
-                        <div class="stat-value unknown" id="unknown">0</div>
-                        <div class="stat-label">Unknown</div>
-                    </div>
-                    <div class="stat-box">
-                        <div class="stat-value" id="active" style="color: #9b59b6;">0</div>
-                        <div class="stat-label">Current Visible</div>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Class Distribution chart removed -->
-            
-            <div class="card" style="margin-top: 20px;">
-                <h2>Instructions</h2>
-                <ul style="padding-left: 20px; line-height: 1.8;">
-                    <li>Select input source (camera, file, or URL)</li>
-                    <li>Fingerlings crossing the line are counted</li>
-                    <li>Counts are grouped by class labels automatically</li>
-                    <li>Click "Reset Counts" to start over</li>
-                    <li>Supports: MP4, AVI, MOV, JPG, PNG</li>
-                    <li>YouTube URLs supported with yt-dlp</li>
-                </ul>
-            </div>
-        </div>
-    </div>
-    
-    <script>
-        const socket = io({ transports: ['polling'], upgrade: false });
-        let isProcessing = false;
-        
-        // Chart removed: distribution chart disabled per user request
-        
-        // Tab switching
-        document.querySelectorAll('.tab').forEach(tab => {
-            tab.addEventListener('click', () => {
-                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-                tab.classList.add('active');
-                document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
-            });
-        });
-        
-        // Socket events
-        function setVideoFeedActive(active) {
-            const videoFeed = document.getElementById('video-feed');
-            if (active) {
-                videoFeed.src = '/video_feed?ts=' + Date.now();
-            } else {
-                videoFeed.removeAttribute('src');
-            }
-        }
-
-        socket.on('update', function(data) {
-            document.getElementById('total').textContent = data.counts.total || 0;
-            document.getElementById('fingerling').textContent = data.counts.fingerling || 0;
-            document.getElementById('post_fingerling').textContent = data.counts.post_fingerling || 0;
-            document.getElementById('juvenile').textContent = data.counts.juvenile || 0;
-            document.getElementById('unknown').textContent = data.counts.unknown || 0;
-            document.getElementById('active').textContent = data.active_tracks || 0;
-            document.getElementById('frame').textContent = data.frame_number;
-            document.getElementById('fps').textContent = data.fps.toFixed(1);
-            document.getElementById('source-type').textContent = data.source_type || 'video';
-            document.getElementById('timestamp').textContent = new Date().toLocaleTimeString();
-            
-            const liveIndicator = document.getElementById('live-indicator');
-            if (data.is_live) {
-                liveIndicator.classList.add('active');
-            } else {
-                liveIndicator.classList.remove('active');
-            }
-            
-            // distribution chart removed; UI shows numeric stats only
-        });
-
-        socket.on('connect', function() {
-            document.getElementById('connection-status').innerHTML = '● Connected';
-            document.getElementById('connection-status').style.color = '#00ff00';
-        });
-
-        socket.on('disconnect', function() {
-            document.getElementById('connection-status').innerHTML = '● Disconnected';
-            document.getElementById('connection-status').style.color = '#ff0000';
-        });
-
-        socket.on('processing_started', function(data) {
-            isProcessing = true;
-            if (data.type === 'camera' || data.type === 'upload' || data.type === 'url') {
-                setVideoFeedActive(true);
-            }
-            showStatus('Processing started: ' + (data.source || 'unknown'), 'active');
-        });
-
-        socket.on('processing_completed', function() {
-            isProcessing = false;
-            setVideoFeedActive(false);
-            showStatus('Processing completed', 'success');
-        });
-
-        socket.on('processing_error', function(data) {
-            isProcessing = false;
-            setVideoFeedActive(false);
-            showStatus('Error: ' + data.error, 'error');
-        });
-
-        socket.on('counts_reset', function() {
-            document.getElementById('total').textContent = '0';
-            document.getElementById('fingerling').textContent = '0';
-            document.getElementById('post_fingerling').textContent = '0';
-            document.getElementById('juvenile').textContent = '0';
-            document.getElementById('unknown').textContent = '0';
-            document.getElementById('active').textContent = '0';
-            // distribution chart removed; reset handled by numeric UI
-            setVideoFeedActive(false);
-        });
-
-        socket.on('batch_results', function(data) {
-            const resultsList = document.getElementById('batch-results-list');
-            let html = '<div style="border-top: 1px solid rgba(255,255,255,0.2); padding-top: 10px;">';
-            
-            // Display batch totals summary
-            const batchTotals = data.batch_totals || {};
-            html += `<div style="background: rgba(0, 212, 255, 0.1); padding: 10px; border-radius: 5px; margin-bottom: 15px; border-left: 3px solid #00d4ff;">
-                <div style="font-weight: bold; color: #00d4ff; margin-bottom: 5px;">📊 Batch Totals by Type</div>
-                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; font-size: 0.85em;">
-                    <div><span style="color: #00d4ff;">Total:</span> <span style="color: #fff; font-weight: bold;">${batchTotals.total || 0}</span></div>
-                    <div><span style="color: #00ff00;">Fingerling:</span> <span style="color: #00ff00; font-weight: bold;">${batchTotals.fingerling || 0}</span></div>
-                    <div><span style="color: #ffbf00;">Post-Fingerling:</span> <span style="color: #ffbf00; font-weight: bold;">${batchTotals.post_fingerling || 0}</span></div>
-                    <div><span style="color: #ffa500;">Juvenile:</span> <span style="color: #ffa500; font-weight: bold;">${batchTotals.juvenile || 0}</span></div>
-                    <div><span style="color: #a0a0a0;">Unknown:</span> <span style="color: #a0a0a0; font-weight: bold;">${batchTotals.unknown || 0}</span></div>
-                </div>
-            </div>`;
-            
-            // Display per-image results with annotations
-            html += '<div style="font-weight: bold; color: #00d4ff; margin-bottom: 10px;">🖼️ Per-Image Results</div>';
-
-            data.results.forEach((result, idx) => {
-                const status = result.status === 'success' ? '✓' : '✗';
-                const color = result.status === 'success' ? '#00ff00' : '#ff4444';
-                
-                html += `<div style="background: rgba(255,255,255,0.05); border-left: 3px solid ${color}; padding: 10px; margin-bottom: 10px; border-radius: 3px;">
-                    <div style="color: ${color}; font-weight: bold; margin-bottom: 8px;">${status} ${result.filename}</div>`;
-                
-                if (result.status === 'success') {
-                    const counts = result.counts || {};
-                    
-                    // Show annotated image if available
-                    if (result.annotated_image) {
-                        html += `<img src="data:image/jpeg;base64,${result.annotated_image}" style="width: 100%; max-width: 200px; border-radius: 5px; margin-bottom: 8px; border: 1px solid rgba(0,212,255,0.3);">`;
-                    }
-                    
-                    // Show per-image counts by class
-                    html += `<div style="font-size: 0.85em; display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;">
-                        <div><span style="color: #00d4ff;">Total:</span> <span style="font-weight: bold;">${counts.total || 0}</span></div>
-                        <div><span style="color: #00ff00;">Fingerling:</span> <span style="color: #00ff00; font-weight: bold;">${counts.fingerling || 0}</span></div>
-                        <div><span style="color: #ffbf00;">Post-Fingerling:</span> <span style="color: #ffbf00; font-weight: bold;">${counts.post_fingerling || 0}</span></div>
-                        <div><span style="color: #ffa500;">Juvenile:</span> <span style="color: #ffa500; font-weight: bold;">${counts.juvenile || 0}</span></div>
-                        <div><span style="color: #a0a0a0;">Unknown:</span> <span style="color: #a0a0a0; font-weight: bold;">${counts.unknown || 0}</span></div>
-                    </div>`;
-                    
-                    // Show label summary
-                    const labelSummary = result.label_summary || 'No detections';
-                    html += `<div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.1); color: #aaa; font-size: 0.8em;">Summary: ${labelSummary}</div>`;
-                } else if (result.error) {
-                    html += `<div style="color: #ff4444; font-size: 0.85em;">Error: ${result.error}</div>`;
-                }
-                
-                html += '</div>';
-            });
-
-            html += '</div>';
-            resultsList.innerHTML = html;
-            showStatus(`Batch processing complete: ${data.total_files} file(s)`, 'success');
-        });
-
-        socket.on('batch_csv_saved', function(data) {
-            showStatus('Batch CSV saved: ' + data.csv_path, 'success');
-        });
-
-        function showStatus(message, type) {
-            const statusEl = document.getElementById('processing-status');
-            const msgEl = document.getElementById('status-message');
-            statusEl.className = 'processing-status ' + type;
-            msgEl.textContent = message;
-        }
-        
-        function startCamera() {
-            const index = document.getElementById('camera-index').value || 0;
-            fetch('/api/start_camera', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({camera_index: parseInt(index)})
-            }).then(r => r.json()).then(data => {
-                if (data.success) showStatus('Starting camera...', 'active');
-            });
-        }
-        
-        function uploadFile() {
-            const fileInput = document.getElementById('file-input');
-            if (!fileInput.files.length) {
-                alert('Please select a file');
-                return;
-            }
-            
-            const formData = new FormData();
-            formData.append('file', fileInput.files[0]);
-            
-            showStatus('Uploading file...', 'active');
-            
-            fetch('/api/upload', {
-                method: 'POST',
-                body: formData
-            }).then(r => r.json()).then(data => {
-                if (data.success) {
-                    showStatus('File uploaded, processing...', 'active');
-                } else {
-                    showStatus('Upload failed: ' + data.error, 'error');
-                }
-            }).catch(err => {
-                showStatus('Upload error: ' + err, 'error');
-            });
-        }
-        
-        function uploadBatch() {
-            const fileInput = document.getElementById('batch-file-input');
-            if (!fileInput.files.length) {
-                alert('Please select at least one image');
-                return;
-            }
-            
-            const formData = new FormData();
-            for (let i = 0; i < fileInput.files.length; i++) {
-                formData.append('files', fileInput.files[i]);
-            }
-            
-            showStatus(`Uploading ${fileInput.files.length} image(s)...`, 'active');
-            document.getElementById('batch-progress').style.display = 'block';
-            document.getElementById('batch-results-list').innerHTML = '';
-            
-            fetch('/api/upload_batch', {
-                method: 'POST',
-                body: formData
-            }).then(r => r.json()).then(data => {
-                if (data.success) {
-                    showStatus(`Batch upload complete: ${data.count} file(s). Processing...`, 'active');
-                    document.getElementById('batch-count').textContent = data.count;
-                } else {
-                    showStatus('Batch upload failed: ' + data.error, 'error');
-                    document.getElementById('batch-progress').style.display = 'none';
-                }
-            }).catch(err => {
-                showStatus('Batch upload error: ' + err, 'error');
-                document.getElementById('batch-progress').style.display = 'none';
-            });
-        }
-        
-        function processUrl() {
-            const url = document.getElementById('url-input').value;
-            if (!url) {
-                alert('Please enter a URL');
-                return;
-            }
-            
-            fetch('/api/process_url', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({url: url})
-            }).then(r => r.json()).then(data => {
-                if (data.success) showStatus('Processing URL...', 'active');
-            });
-        }
-        
-        function stopProcessing() {
-            fetch('/api/stop', {method: 'POST'})
-                .then(r => r.json())
-                .then(data => showStatus('Processing stopped', 'success'));
-        }
-        
-        function resetCounts() {
-            fetch('/api/reset_counts', {method: 'POST'});
-        }
-    </script>
-</body>
-</html>
-"""
