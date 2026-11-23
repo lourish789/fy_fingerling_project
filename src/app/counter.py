@@ -25,6 +25,9 @@ from models.tracker import FingerlingTracker
 from video.processor import VideoProcessor, VideoWriter, ImageProcessor, URLVideoHandler
 from video.visualization import Visualizer, VisualizationConfig
 from streaming.server import StreamingServer, ConsoleStreamer, CSVLogger
+from app.run_log import RunRecorder, file_fingerprint
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 class FingerlingCounter:
@@ -84,7 +87,16 @@ class FingerlingCounter:
         self.use_display = use_display
         self.output_path = output_path
         self.web_server_mode = web_server_mode
-        
+
+        # Job control. Only one source is processed at a time: a new request
+        # bumps _job_seq, the running loop notices and exits, and the new job
+        # starts only once _job_lock is free, so two loops never share a tracker.
+        self._job_lock = threading.Lock()
+        self._job_seq_lock = threading.Lock()
+        self._job_seq = 0
+        self._reset_requested = False
+        self._quit_requested = False
+
         # Initialize components
         self._init_components()
         
@@ -114,7 +126,12 @@ class FingerlingCounter:
 
     def _reset_counts_from_server(self) -> None:
         """Reset tracker counts and push immediate zero state to dashboard."""
-        self.tracker.reset_counts()
+        if self.is_processing:
+            # Let the processing loop do it between frames, so it can close the
+            # current run record and start a new one cleanly.
+            self._reset_requested = True
+        else:
+            self.tracker.reset_counts()
 
         if self.streaming_server:
             zero_counts = {'total': 0, 'unknown': 0}
@@ -185,17 +202,16 @@ class FingerlingCounter:
                 self.detector = FingerlingDetectorFallback()
         
         # Tracker
-        tracking_config = self.config.get('tracking', {})
-        counting_config = self.config.get('counting', {})
-        self.tracker = FingerlingTracker(
-            max_age=tracking_config.get('max_age', 30),
-            min_hits=tracking_config.get('min_hits', 3),
-            iou_threshold=tracking_config.get('iou_threshold', 0.3),
-            max_distance=tracking_config.get('max_distance', 100),
-            counting_mode=counting_config.get('mode', 'unique_track'),
-            count_min_hits=counting_config.get('count_min_hits', 1)
-        )
-        
+        self.tracker = self._build_tracker()
+
+        # Per-run audit records (events.csv, summary.json, report.html)
+        output_config = self.config.get('output', {})
+        runs_dir = Path(output_config.get('runs_dir', 'output/runs'))
+        self.runs_dir = runs_dir if runs_dir.is_absolute() else REPO_ROOT / runs_dir
+        self.save_runs = bool(output_config.get('save_runs', True))
+        self.save_event_crops = bool(output_config.get('save_event_crops', True))
+        self.model_fingerprint = file_fingerprint(str(self.weights_path or ''))
+
         # Video processor
         video_config = self.config.get('video', {})
         self.video_processor = VideoProcessor(
@@ -234,7 +250,8 @@ class FingerlingCounter:
                     update_interval_ms=streaming_config.get('update_interval_ms', 100),
                     process_callback=self._process_new_source if self.web_server_mode else None,
                     stop_callback=self._stop_from_server,
-                    reset_callback=self._reset_counts_from_server
+                    reset_callback=self._reset_counts_from_server,
+                    runs_dir=str(self.runs_dir)
                 )
                 # Expose counter instance to streaming server for batch processing
                 try:
@@ -266,22 +283,109 @@ class FingerlingCounter:
         self.video_processor: Optional[VideoProcessor] = None
         self.counting_line = None
         self.counting_line_orientation = 'horizontal'
-    
+
+    def _build_tracker(self) -> FingerlingTracker:
+        """Create a tracker from config. Each job gets a fresh one, so no tracks carry over."""
+        tracking_config = self.config.get('tracking', {})
+        counting_config = self.config.get('counting', {})
+        return FingerlingTracker(
+            max_age=tracking_config.get('max_age', 30),
+            min_hits=tracking_config.get('min_hits', 3),
+            iou_threshold=tracking_config.get('iou_threshold', 0.3),
+            max_distance=tracking_config.get('max_distance', 100),
+            counting_mode=counting_config.get('mode', 'unique_track'),
+            count_min_hits=counting_config.get('count_min_hits', 1),
+            count_direction=counting_config.get('count_direction', 'any')
+        )
+
+    def _run_settings(self) -> Dict[str, Any]:
+        """The settings that determine a count, saved with every run for traceability."""
+        model_config = self.config.get('model', {})
+        tracking_config = self.config.get('tracking', {})
+        counting_config = self.config.get('counting', {})
+        return {
+            'model_file': Path(str(self.weights_path or 'none')).name,
+            'model_sha256_12': self.model_fingerprint,
+            'confidence_threshold': getattr(self.detector, 'confidence_threshold',
+                                            model_config.get('confidence_threshold')),
+            'nms_iou_threshold': getattr(self.detector, 'iou_threshold',
+                                         model_config.get('iou_threshold')),
+            'counting_mode': self.tracker.counting_mode,
+            'count_direction': self.tracker.count_direction,
+            'counting_line_position': counting_config.get('counting_line_position', 0.5),
+            'counting_line_orientation': counting_config.get('counting_line_orientation', 'horizontal'),
+            'min_hits': self.tracker.min_hits,
+            'max_distance_px': self.tracker.max_distance,
+            'max_age_frames': tracking_config.get('max_age', 30),
+        }
+
+    def _start_run_record(self) -> Optional[RunRecorder]:
+        if not self.save_runs:
+            return None
+        counting_config = self.config.get('counting', {})
+        try:
+            return RunRecorder(
+                runs_dir=self.runs_dir,
+                source_label=str(self.video_source),
+                settings=self._run_settings(),
+                class_keys=self.class_keys,
+                save_crops=self.save_event_crops,
+                correction_factor=float(counting_config.get('count_correction_factor', 1.0) or 1.0),
+                correction_note=str(counting_config.get('count_correction_note', '') or ''),
+            )
+        except OSError as e:
+            print(f"Warning: could not create run record ({e}). Counting continues without it.")
+            return None
+
+    def _finish_run_record(self, recorder: Optional[RunRecorder], status: str,
+                           frames_done: int, error: str = '') -> Optional[Dict[str, Any]]:
+        if recorder is None:
+            return None
+        try:
+            info = self.video_processor.get_info() if self.video_processor else {}
+            summary = recorder.finish(self._normalized_counts(self.tracker.get_counts()),
+                                      status, frames_done, info, error)
+        except Exception as e:
+            print(f"Warning: could not finalise run record ({e}).")
+            return None
+        print(f"\nRun saved: {recorder.dir}")
+        if self.streaming_server:
+            self.streaming_server.notify_run_saved(summary)
+        return summary
+
     def _process_new_source(self, source: Union[str, int]) -> None:
         """
         Process a new source (called from web server).
-        
+
+        A newer request supersedes this one; the running loop exits at its next
+        frame, and this job starts only after it has fully finished.
+
         Args:
             source: New video/image source to process.
         """
-        # Stop current processing
-        self.stop_requested = True
-        time.sleep(0.5)  # Wait for current processing to stop
-        
-        # Reset state
-        self.tracker.reset_counts()
-        self.stop_requested = False
+        def job(job_id: int) -> None:
+            self.stop_requested = False
+            self._reset_requested = False
+            self.tracker = self._build_tracker()
+            self._process_source_locked(source, job_id)
 
+        self._run_job(job)
+
+    def run_exclusive(self, fn, *args):
+        """Run fn(*args) as a job: it waits for, and supersedes, any running processing loop."""
+        return self._run_job(lambda _job_id: fn(*args))
+
+    def _run_job(self, fn):
+        with self._job_seq_lock:
+            self._job_seq += 1
+            job_id = self._job_seq
+
+        with self._job_lock:
+            if job_id != self._job_seq:
+                return None  # an even newer request arrived while this one was waiting
+            return fn(job_id)
+
+    def _process_source_locked(self, source: Union[str, int], job_id: int) -> None:
         source_str = str(source)
         if isinstance(source, str) and (ImageProcessor.is_image_file(source_str) or ImageProcessor.is_image_url(source_str)):
             image_result = self.process_image_file(source_str, no_annotations=False)
@@ -327,9 +431,11 @@ class FingerlingCounter:
         self.video_source = source
         self.counting_line = None
         self._create_video_processor()
-        
+
         # Run processing (blocking in this thread)
-        self._run_processing_loop()
+        summary = self._run_processing_loop(job_id)
+        if summary and summary.get('status') == 'error':
+            raise RuntimeError(summary.get('error') or 'Processing failed')
     
     def _create_video_processor(self) -> None:
         """Create or recreate video processor for current source."""
@@ -554,94 +660,147 @@ class FingerlingCounter:
         
         return final_counts
     
-    def _run_processing_loop(self) -> None:
-        """Main processing loop."""
+    def _run_processing_loop(self, job_id: int = 0) -> Optional[Dict[str, Any]]:
+        """
+        Main processing loop.
+
+        Returns the run summary (also written to output/runs/<run_id>/), or None
+        when run recording is disabled.
+        """
         self.is_running = True
         self.is_processing = True
         self.stop_requested = False
         self.start_time = time.time()
         self.frame_count = 0
-        
-        for frame_data in self.video_processor.frames():
-            if not self.is_running or self.stop_requested:
-                break
-            
-            frame = frame_data.frame
-            self.frame_count = frame_data.frame_number
 
-            if self.counting_line is None:
-                frame_h, frame_w = frame.shape[:2]
-                self._setup_counting_line(frame_w, frame_h)
-            
-            # Process frame
-            results = self.process_frame(frame)
-            
-            # Always produce an annotated frame for viewers (boxes + labels).
-            annotated_frame = self.visualizer.draw_all(
-                frame,
-                detections=results['detections'],
-                tracks=results['tracks'],
-                counting_line=self.counting_line,
-                counting_line_orientation=self.counting_line_orientation,
-                stats=results['stats']
-            )
-            
-            # Update streaming server
-            if self.streaming_server:
-                self.streaming_server.update_frame(annotated_frame)
-                self.streaming_server.update_data(
-                    frame_number=self.frame_count,
-                    counts=results['stats']['counts'],
-                    current_detections=len(results['detections']),
-                    active_tracks=results['stats']['active_tracks'],
-                    size_distribution=results['size_distribution'],
-                    fps=results['stats']['fps'],
-                    source_type=self.video_processor.source_type,
-                    is_live=self.video_processor.is_live
-                )
-            
-            # Console update
-            self.console_streamer.update(
+        recorder = self._start_run_record()
+        status, error = 'completed', ''
+        frames_done = 0   # frames in the current run record (restarts after a reset)
+        frames_read = 0   # frames read from the source in total
+        summary = None
+
+        try:
+            for frame_data in self.video_processor.frames():
+                if not self.is_running or self.stop_requested:
+                    status = 'stopped'
+                    break
+                if job_id != self._job_seq:
+                    status = 'superseded'
+                    break
+                if self._reset_requested:
+                    self._reset_requested = False
+                    # Close the record with the counts so far, then start from zero.
+                    self._finish_run_record(recorder, 'reset', frames_done)
+                    self.tracker.reset_counts()
+                    recorder = self._start_run_record()
+                    frames_done = 0
+
+                self._process_one_frame(frame_data, recorder)
+                frames_done += 1
+                frames_read += 1
+                if self._quit_requested:  # 'q' pressed in the local preview window
+                    status = 'stopped'
+                    break
+            else:
+                if frames_read == 0:
+                    status, error = 'error', f'No frames could be read from: {self.video_source}'
+        except Exception as e:
+            status, error = 'error', f'{type(e).__name__}: {e}'
+            raise
+        finally:
+            self.is_processing = False
+            summary = self._finish_run_record(recorder, status, frames_done, error)
+            if recorder is None and status == 'error':
+                summary = {'status': status, 'error': error}
+
+        return summary
+
+    def _process_one_frame(self, frame_data, recorder: Optional[RunRecorder]) -> None:
+        """Detect, track, count, record and publish one frame."""
+        self._quit_requested = False
+        frame = frame_data.frame
+        self.frame_count = frame_data.frame_number
+
+        if self.counting_line is None:
+            frame_h, frame_w = frame.shape[:2]
+            self._setup_counting_line(frame_w, frame_h)
+
+        # Process frame
+        results = self.process_frame(frame)
+
+        # Per-fish audit trail
+        new_events = self.tracker.drain_events()
+        if recorder is not None and new_events:
+            if self.video_processor.is_live:
+                video_time = frame_data.timestamp
+            else:
+                video_time = frame_data.frame_number / (self.video_processor.original_fps or 30.0)
+            recorder.record(new_events, frame, video_time)
+
+        # Always produce an annotated frame for viewers (boxes + labels).
+        annotated_frame = self.visualizer.draw_all(
+            frame,
+            detections=results['detections'],
+            tracks=results['tracks'],
+            counting_line=self.counting_line,
+            counting_line_orientation=self.counting_line_orientation,
+            stats=results['stats']
+        )
+
+        # Update streaming server
+        if self.streaming_server:
+            self.streaming_server.update_frame(annotated_frame)
+            self.streaming_server.update_data(
                 frame_number=self.frame_count,
                 counts=results['stats']['counts'],
+                current_detections=len(results['detections']),
+                active_tracks=results['stats']['active_tracks'],
                 size_distribution=results['size_distribution'],
+                fps=results['stats']['fps'],
+                source_type=self.video_processor.source_type,
+                is_live=self.video_processor.is_live
+            )
+
+        # Console update
+        self.console_streamer.update(
+            frame_number=self.frame_count,
+            counts=results['stats']['counts'],
+            size_distribution=results['size_distribution'],
+            fps=results['stats']['fps']
+        )
+
+        # Save video frame
+        if self.video_writer:
+            self.video_writer.write(annotated_frame)
+
+        # Log to CSV
+        if self.csv_logger and self.frame_count % 30 == 0:
+            self.csv_logger.log(
+                frame_number=self.frame_count,
+                counts=results['stats']['counts'],
                 fps=results['stats']['fps']
             )
-            
-            # Save video frame
-            if self.video_writer:
-                self.video_writer.write(annotated_frame)
-            
-            # Log to CSV
-            if self.csv_logger and self.frame_count % 30 == 0:
-                self.csv_logger.log(
-                    frame_number=self.frame_count,
-                    counts=results['stats']['counts'],
-                    fps=results['stats']['fps']
-                )
-            
-            # Display
-            if self.use_display:
-                try:
-                    cv2.imshow('Fingerling Counter', annotated_frame)
-                    key = cv2.waitKey(1) & 0xFF
-                    if key == ord('q'):
-                        break
-                    elif key == ord('r'):
-                        self.tracker.reset_counts()
-                        print("\nCounts reset!")
-                    elif key == ord('s'):
-                        screenshot_path = f"screenshot_{self.frame_count}.jpg"
-                        cv2.imwrite(screenshot_path, annotated_frame)
-                        print(f"\nScreenshot saved: {screenshot_path}")
-                except cv2.error:
-                    # OpenCV headless mode - disable display
-                    if self.use_display:
-                        print("\nNote: Display not available (headless mode). Using web dashboard only.")
-                        self.use_display = False
-        
-        self.is_processing = False
-    
+
+        # Display
+        if self.use_display:
+            try:
+                cv2.imshow('Fingerling Counter', annotated_frame)
+                key = cv2.waitKey(1) & 0xFF
+                if key == ord('q'):
+                    self._quit_requested = True
+                elif key == ord('r'):
+                    self._reset_requested = True
+                    print("\nCounts reset!")
+                elif key == ord('s'):
+                    screenshot_path = f"screenshot_{self.frame_count}.jpg"
+                    cv2.imwrite(screenshot_path, annotated_frame)
+                    print(f"\nScreenshot saved: {screenshot_path}")
+            except cv2.error:
+                # OpenCV headless mode - disable display
+                if self.use_display:
+                    print("\nNote: Display not available (headless mode). Using web dashboard only.")
+                    self.use_display = False
+
     def run_web_server(self) -> None:
         """
         Run as web server only (for file uploads and URL processing).
@@ -653,10 +812,15 @@ class FingerlingCounter:
             print("Error: Streaming server not available")
             return
         
+        port = self.streaming_server.port
         print("\n" + "=" * 50)
         print("Fingerling Counter - Web Server Mode")
         print("=" * 50)
-        print(f"Dashboard: http://localhost:{self.streaming_server.port}")
+        print(f"Dashboard (this computer):   http://localhost:{port}")
+        lan_ip = _lan_ip()
+        if lan_ip:
+            print(f"Dashboard (same Wi-Fi/LAN):  http://{lan_ip}:{port}")
+        print(f"Run records saved to:        {self.runs_dir}")
         print("Upload videos, images, or enter URLs to process")
         print("Press Ctrl+C to stop")
         print("=" * 50 + "\n")
@@ -691,6 +855,20 @@ class FingerlingCounter:
             cv2.destroyAllWindows()
         except cv2.error:
             pass  # Headless mode - no windows to destroy
+
+
+def _lan_ip() -> Optional[str]:
+    """Best-effort local network address, for phones/tablets on the same Wi-Fi. Sends nothing."""
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("10.255.255.255", 1))  # UDP connect only selects a route; no packet is sent
+        ip = s.getsockname()[0]
+        return None if ip.startswith("127.") else ip
+    except OSError:
+        return None
+    finally:
+        s.close()
 
 
 def main():

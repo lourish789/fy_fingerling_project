@@ -10,7 +10,10 @@ import time
 import threading
 import base64
 import os
+import re
+import shutil
 import tempfile
+import uuid
 from typing import Dict, Any, Optional, Generator, Callable
 from dataclasses import dataclass, asdict
 from datetime import datetime
@@ -29,6 +32,10 @@ try:
 except ImportError:
     FLASK_AVAILABLE = False
     print("Warning: Flask not available. Install with: pip install flask flask-socketio")
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+FRONTEND_DIR = REPO_ROOT / 'frontend'
+RUN_ID_PATTERN = re.compile(r'^[A-Za-z0-9_-]{1,120}$')
 
 
 @dataclass
@@ -74,7 +81,8 @@ class StreamingServer:
         upload_folder: Optional[str] = None,
         process_callback: Optional[Callable] = None,
         stop_callback: Optional[Callable] = None,
-        reset_callback: Optional[Callable] = None
+        reset_callback: Optional[Callable] = None,
+        runs_dir: Optional[str] = None
     ):
         """
         Initialize streaming server.
@@ -87,6 +95,7 @@ class StreamingServer:
             process_callback: Callback function to process new source.
             stop_callback: Callback to stop active processing loop.
             reset_callback: Callback to reset tracker counts/state.
+            runs_dir: Folder holding per-run records (served for download).
         """
         if not FLASK_AVAILABLE:
             raise ImportError("Flask is required. Install with: pip install flask flask-socketio")
@@ -98,7 +107,13 @@ class StreamingServer:
         self.process_callback = process_callback
         self.stop_callback = stop_callback
         self.reset_callback = reset_callback
-        
+        self.runs_dir = Path(runs_dir) if runs_dir else REPO_ROOT / 'output' / 'runs'
+
+        # One job at a time. _job_seq identifies the newest job so that a job
+        # which was stopped and replaced does not report "completed" over it.
+        self._job_state_lock = threading.Lock()
+        self._job_seq = 0
+
         # Flask app
         self.app = Flask(__name__)
         CORS(self.app, resources={r"/*": {"origins": "*"}})
@@ -141,8 +156,49 @@ class StreamingServer:
         
         @self.app.route('/')
         def index():
-            """Main API endpoint."""
+            """Serve the dashboard (offline / same-origin use), or a status message."""
+            if (FRONTEND_DIR / 'index.html').exists():
+                return send_from_directory(FRONTEND_DIR, 'index.html')
             return jsonify({'status': 'Fingerling Counter API is running', 'message': 'Frontend is hosted separately.'})
+
+        @self.app.route('/config.js')
+        def frontend_config():
+            """Tells a dashboard served from this backend to call this same origin."""
+            return Response('window.AQUACOUNT_API = window.location.origin;\n',
+                            mimetype='application/javascript')
+
+        @self.app.route('/vendor/<path:filename>')
+        def frontend_vendor(filename):
+            return send_from_directory(FRONTEND_DIR / 'vendor', filename, max_age=86400)
+
+        @self.app.route('/api/runs')
+        def list_runs():
+            """Most recent runs first, with their summaries."""
+            runs = []
+            if self.runs_dir.is_dir():
+                for d in sorted(self.runs_dir.iterdir(), key=lambda x: x.name, reverse=True)[:100]:
+                    if not d.is_dir() or not RUN_ID_PATTERN.match(d.name):
+                        continue
+                    summary_path = d / 'summary.json'
+                    if summary_path.exists():
+                        try:
+                            runs.append(json.loads(summary_path.read_text(encoding='utf-8')))
+                            continue
+                        except (OSError, ValueError):
+                            pass
+                    runs.append({'run_id': d.name, 'status': 'running_or_incomplete'})
+            return jsonify({'runs': runs})
+
+        @self.app.route('/api/runs/<run_id>/<path:filename>')
+        def get_run_file(run_id, filename):
+            """Download a run's events.csv / summary.json / report.html / crops."""
+            if not RUN_ID_PATTERN.match(run_id):
+                return jsonify({'error': 'Invalid run id'}), 400
+            run_dir = self.runs_dir / run_id
+            if not run_dir.is_dir():
+                return jsonify({'error': 'Run not found'}), 404
+            return send_from_directory(run_dir, filename,
+                                       as_attachment=request.args.get('download') == '1')
         
         @self.app.route('/video_feed')
         def video_feed():
@@ -184,22 +240,19 @@ class StreamingServer:
                 return jsonify({'error': 'No file selected'}), 400
             
             if file and self._allowed_file(file.filename):
-                filename = secure_filename(file.filename)
-                filepath = os.path.join(self.upload_folder, filename)
-                file.save(filepath)
-                
-                # Trigger processing callback
-                if self.process_callback:
-                    threading.Thread(
-                        target=self._process_uploaded_file,
-                        args=(filepath,),
-                        daemon=True
-                    ).start()
-                
+                if self.is_processing:
+                    return self._busy_response()
+                if not self.process_callback:
+                    return jsonify({'error': 'Server is not accepting jobs'}), 503
+                filename, filepath, upload_dir = self._save_upload(file)
+                if not self._start_job('upload', filename, self.process_callback, (filepath,),
+                                       cleanup=[upload_dir]):
+                    shutil.rmtree(upload_dir, ignore_errors=True)
+                    return self._busy_response()
+
                 return jsonify({
                     'success': True,
                     'filename': filename,
-                    'filepath': filepath,
                     'message': 'File uploaded successfully. Processing started.'
                 })
             
@@ -215,26 +268,31 @@ class StreamingServer:
             if not files:
                 return jsonify({'error': 'No files selected'}), 400
             
+            if self.is_processing:
+                return self._busy_response()
+
             uploaded_files = []
+            upload_dirs = []
             for file in files:
                 if file.filename and self._allowed_file(file.filename):
-                    filename = secure_filename(file.filename)
-                    filepath = os.path.join(self.upload_folder, filename)
-                    file.save(filepath)
+                    filename, filepath, upload_dir = self._save_upload(file)
+                    upload_dirs.append(upload_dir)
                     uploaded_files.append({'filename': filename, 'filepath': filepath})
-            
+
             if uploaded_files:
-                # Trigger batch processing callback
-                if self.process_callback:
-                    threading.Thread(
-                        target=self._process_batch_files,
-                        args=(uploaded_files,),
-                        daemon=True
-                    ).start()
-                
+                runner = self._process_batch_files
+                if getattr(self, 'counter', None) is not None:
+                    # Same queue as video jobs, so a batch never overlaps a count.
+                    runner = lambda f: self.counter.run_exclusive(self._process_batch_files, f)
+                if not self._start_job('batch_upload', f'{len(uploaded_files)} image(s)', runner,
+                                       (uploaded_files,), cleanup=upload_dirs):
+                    for d in upload_dirs:
+                        shutil.rmtree(d, ignore_errors=True)
+                    return self._busy_response()
+
                 return jsonify({
                     'success': True,
-                    'files': uploaded_files,
+                    'files': [{'filename': f['filename']} for f in uploaded_files],
                     'count': len(uploaded_files),
                     'message': f'Uploaded {len(uploaded_files)} file(s). Processing started.'
                 })
@@ -248,16 +306,14 @@ class StreamingServer:
             if not data or 'url' not in data:
                 return jsonify({'error': 'No URL provided'}), 400
             
-            url = data['url']
-            
-            # Trigger processing callback
-            if self.process_callback:
-                threading.Thread(
-                    target=self._process_url,
-                    args=(url,),
-                    daemon=True
-                ).start()
-            
+            url = str(data['url']).strip()
+            if not re.match(r'^(https?|rtsp|rtmp)://', url, re.IGNORECASE):
+                return jsonify({'error': 'URL must start with http(s)://, rtsp:// or rtmp://'}), 400
+            if not self.process_callback:
+                return jsonify({'error': 'Server is not accepting jobs'}), 503
+            if not self._start_job('url', url, self.process_callback, (url,)):
+                return self._busy_response()
+
             return jsonify({
                 'success': True,
                 'url': url,
@@ -268,15 +324,16 @@ class StreamingServer:
         def start_camera():
             """Start processing from camera."""
             data = request.get_json() or {}
-            camera_index = data.get('camera_index', 0)
-            
-            if self.process_callback:
-                threading.Thread(
-                    target=self._process_camera,
-                    args=(camera_index,),
-                    daemon=True
-                ).start()
-            
+            try:
+                camera_index = int(data.get('camera_index', 0))
+            except (TypeError, ValueError):
+                return jsonify({'error': 'camera_index must be a whole number'}), 400
+            if not self.process_callback:
+                return jsonify({'error': 'Server is not accepting jobs'}), 503
+            if not self._start_job('camera', f'camera {camera_index}', self.process_callback,
+                                   (camera_index,)):
+                return self._busy_response()
+
             return jsonify({
                 'success': True,
                 'camera_index': camera_index,
@@ -318,29 +375,82 @@ class StreamingServer:
             """Handle client disconnection."""
             print("Client disconnected")
     
-    def _process_uploaded_file(self, filepath: str) -> None:
-        """Process uploaded file."""
-        self.is_processing = True
-        self.socketio.emit('processing_started', {'source': filepath, 'type': 'upload'})
-        
-        if self.process_callback:
+    def _busy_response(self):
+        return jsonify({
+            'error': 'A count is already running. Stop it before starting another.',
+            'busy': True
+        }), 409
+
+    def _save_upload(self, file):
+        """Save an upload in its own folder: no name collisions, and easy to delete afterwards."""
+        original = Path(file.filename)
+        stem = secure_filename(original.stem) or 'upload'
+        ext = original.suffix.lower()
+        upload_dir = os.path.join(self.upload_folder, uuid.uuid4().hex[:12])
+        os.makedirs(upload_dir, exist_ok=True)
+        filename = f"{stem}{ext}"
+        filepath = os.path.join(upload_dir, filename)
+        file.save(filepath)
+        return filename, filepath, upload_dir
+
+    def _start_job(self, kind: str, label: str, target: Callable, args: tuple,
+                   cleanup: Optional[list] = None) -> bool:
+        """
+        Run `target(*args)` in a background thread as the single active job.
+
+        Returns False, and starts nothing, if a job is already running.
+        """
+        with self._job_state_lock:
+            if self.is_processing:
+                return False
+            self.is_processing = True
+            self._job_seq += 1
+            job = self._job_seq
+
+        def runner():
+            self.socketio.emit('processing_started', {'source': label, 'type': kind, 'job': job})
             try:
-                self.process_callback(filepath)
+                target(*args)
             except Exception as e:
-                self.socketio.emit('processing_error', {'error': str(e)})
+                if job == self._job_seq:
+                    self.socketio.emit('processing_error', {'error': str(e), 'job': job})
             finally:
-                self.is_processing = False
-                self.socketio.emit('processing_completed', {})
-    
+                for d in cleanup or []:
+                    shutil.rmtree(d, ignore_errors=True)
+                with self._job_state_lock:
+                    is_latest = job == self._job_seq
+                    if is_latest:
+                        self.is_processing = False
+                if is_latest:
+                    self.socketio.emit('processing_completed', {'job': job})
+
+        threading.Thread(target=runner, daemon=True).start()
+        return True
+
+    def notify_run_saved(self, summary: Dict[str, Any]) -> None:
+        """Tell dashboards a run record is ready, with download links."""
+        run_id = summary.get('run_id', '')
+        base = f"/api/runs/{run_id}/"
+        payload = {
+            'run_id': run_id,
+            'status': summary.get('status'),
+            'counts': summary.get('counts', {}),
+            'corrected_total': summary.get('corrected_total'),
+            'correction_factor': summary.get('correction_factor'),
+            'warning': summary.get('warning', ''),
+            'links': {
+                'report': base + 'report.html',
+                'events_csv': base + 'events.csv?download=1',
+                'summary_json': base + 'summary.json?download=1',
+            },
+        }
+        try:
+            self.socketio.emit('run_saved', payload)
+        except Exception:
+            pass
+
     def _process_batch_files(self, files: list) -> None:
         """Process multiple image files in batch."""
-        self.is_processing = True
-        self.socketio.emit('processing_started', {
-            'source': 'batch',
-            'type': 'batch_upload',
-            'file_count': len(files)
-        })
-        
         self.batch_results = []
         batch_totals = {
             'total': 0,
@@ -433,12 +543,12 @@ class StreamingServer:
             'results': self.batch_results
         })
 
-        # Save CSV summary for this batch
+        # Save CSV summary for this batch as a downloadable run record
         try:
-            out_root = Path(__file__).resolve().parents[2]
-            out_dir = out_root / 'output' / 'batch_summaries'
+            run_id = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_batch-{uuid.uuid4().hex[:4]}"
+            out_dir = self.runs_dir / run_id
             out_dir.mkdir(parents=True, exist_ok=True)
-            csv_path = out_dir / f"batch_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+            csv_path = out_dir / 'batch_summary.csv'
             import csv as _csv
             with open(csv_path, 'w', newline='', encoding='utf-8') as _f:
                 writer = _csv.writer(_f)
@@ -458,42 +568,14 @@ class StreamingServer:
 
             # Notify clients that CSV was saved
             try:
-                self.socketio.emit('batch_csv_saved', {'csv_path': str(csv_path)})
-            except:
+                self.socketio.emit('batch_csv_saved', {
+                    'run_id': run_id,
+                    'url': f'/api/runs/{run_id}/batch_summary.csv?download=1'
+                })
+            except Exception:
                 pass
         except Exception as e:
             print(f"Failed to write batch CSV: {e}")
-
-        self.is_processing = False
-        self.socketio.emit('processing_completed', {})
-    
-    def _process_url(self, url: str) -> None:
-        """Process URL source."""
-        self.is_processing = True
-        self.socketio.emit('processing_started', {'source': url, 'type': 'url'})
-        
-        if self.process_callback:
-            try:
-                self.process_callback(url)
-            except Exception as e:
-                self.socketio.emit('processing_error', {'error': str(e)})
-            finally:
-                self.is_processing = False
-                self.socketio.emit('processing_completed', {})
-    
-    def _process_camera(self, camera_index: int) -> None:
-        """Process camera source."""
-        self.is_processing = True
-        self.socketio.emit('processing_started', {'source': camera_index, 'type': 'camera'})
-        
-        if self.process_callback:
-            try:
-                self.process_callback(camera_index)
-            except Exception as e:
-                self.socketio.emit('processing_error', {'error': str(e)})
-            finally:
-                self.is_processing = False
-                self.socketio.emit('processing_completed', {})
     
     def _generate_frames(self) -> Generator[bytes, None, None]:
         """Generate MJPEG frames."""
@@ -630,12 +712,17 @@ class StreamingServer:
     
     def _run_server(self) -> None:
         """Run the Flask server."""
+        # Local / hatchery-laptop mode only (Render runs gunicorn, which never
+        # calls this). Werkzeug's threaded server is fine for a handful of
+        # dashboards on a LAN; without the flag Flask-SocketIO refuses to start
+        # when launched without a console, e.g. from a desktop shortcut.
         self.socketio.run(
             self.app,
             host=self.host,
             port=self.port,
             debug=False,
-            use_reloader=False
+            use_reloader=False,
+            allow_unsafe_werkzeug=True
         )
     
     def stop(self) -> None:
@@ -735,7 +822,7 @@ class CSVLogger:
         # Write header
         with open(self.output_path, 'w') as f:
             class_columns = ','.join(self.class_keys + ['unknown'])
-            f.write(f"timestamp,frame,total,{class_columns},fps\\n")
+            f.write(f"timestamp,frame,total,{class_columns},fps\n")
     
     def log(
         self,

@@ -1,0 +1,72 @@
+{
+ "summary": {
+  "video": "VID_20260617_151857.mp4",
+  "conf": 0.5,
+  "mode": "line_crossing",
+  "min_hits": 3,
+  "count_min_hits": 3,
+  "max_dist": 160,
+  "imgsz": 640,
+  "frames_processed": 2815,
+  "detections_total": 206,
+  "frames_with_detection": 197,
+  "mean_det_per_frame": 0.073,
+  "tracks_created": 49,
+  "COUNT_total": 3,
+  "per_class": {
+   "juvenile": 3
+  },
+  "wall_s": 450.0,
+  "mean_inference_ms": 149.6
+ },
+ "events": [
+  {
+   "frame": 732,
+   "track": 8,
+   "cls": "juvenile",
+   "center": [
+    1050,
+    549
+   ],
+   "bbox": [
+    756,
+    409,
+    1345,
+    690
+   ],
+   "conf": 0.782
+  },
+  {
+   "frame": 1173,
+   "track": 22,
+   "cls": "juvenile",
+   "center": [
+    1162,
+    537
+   ],
+   "bbox": [
+    796,
+    409,
+    1528,
+    666
+   ],
+   "conf": 0.624
+  },
+  {
+   "frame": 1366,
+   "track": 27,
+   "cls": "juvenile",
+   "center": [
+    776,
+    588
+   ],
+   "bbox": [
+    482,
+    451,
+    1070,
+    725
+   ],
+   "conf": 0.647
+  }
+ ]
+}

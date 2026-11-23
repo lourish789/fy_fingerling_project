@@ -7,7 +7,7 @@ to track fingerlings across frames and count them accurately.
 
 import numpy as np
 from typing import List, Dict, Any, Tuple, Optional
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from scipy.optimize import linear_sum_assignment
 
@@ -32,12 +32,19 @@ class Track:
     history: List[Tuple[int, int]] = field(default_factory=list)
     counted: bool = False
     direction: Optional[str] = None  # "up", "down", "left", "right"
-    
+    class_votes: Counter = field(default_factory=Counter)
+    # Sides of the counting line (-1 = before, +1 = after) this track has been
+    # observed on. Counting uses this instead of the last step only, so a fish
+    # that crosses before it is confirmed is still counted once confirmed.
+    sides_seen: set = field(default_factory=set)
+    conf_sum: float = 0.0
+
     def update(self, detection: Dict[str, Any]) -> None:
         """Update track with new detection."""
         self.bbox = detection['bbox']
         self.center = detection['center']
         self.class_name = detection.get('class_name', self.class_name)
+        self.class_votes[self.class_name] += 1
         self.class_display_name = detection.get('class_display_name', self.class_display_name)
         self.class_color = detection.get('class_color', self.class_color)
         self.size_category = detection.get('size_category', self.size_category)
@@ -45,6 +52,7 @@ class Track:
         self.size_color = detection.get('size_color', self.size_color)
         self.estimated_length_mm = detection.get('estimated_length_mm', self.estimated_length_mm)
         self.confidence = detection.get('confidence', self.confidence)
+        self.conf_sum += float(self.confidence)
         self.hits += 1
         self.time_since_update = 0
         self.history.append(self.center)
@@ -76,6 +84,23 @@ class Track:
         """Check if track is confirmed (enough detections)."""
         return self.hits >= min_hits
     
+    def get_voted_class(self) -> str:
+        """
+        Return the modal class label over the track's lifetime.
+
+        Per-frame labels flicker on small, fast-moving fish; counting a track
+        under its most recent label therefore sorts it by whichever frame
+        happened to be last. The majority vote absorbs isolated
+        misclassifications. Ties resolve to the label seen first.
+        """
+        if not self.class_votes:
+            return self.class_name or 'unknown'
+        return self.class_votes.most_common(1)[0][0]
+
+    @property
+    def mean_confidence(self) -> float:
+        return self.conf_sum / max(self.hits, 1)
+
     def get_direction(self) -> Optional[str]:
         """Determine movement direction based on history."""
         if len(self.history) < 5:
@@ -114,7 +139,8 @@ class FingerlingTracker:
         iou_threshold: float = 0.3,
         max_distance: int = 100,
         counting_mode: str = "unique_track",
-        count_min_hits: int = 1
+        count_min_hits: int = 1,
+        count_direction: str = "any"
     ):
         """
         Initialize the tracker.
@@ -126,6 +152,8 @@ class FingerlingTracker:
             max_distance: Maximum distance for center-based association.
             counting_mode: Counting strategy: "unique_track" or "line_crossing".
             count_min_hits: Minimum hits before a track contributes to cumulative counts.
+            count_direction: Which line crossings count. "down"/"right" count only
+                downstream crossings, "up"/"left" only upstream, "any" counts both.
         """
         self.max_age = max_age
         self.min_hits = min_hits
@@ -133,6 +161,7 @@ class FingerlingTracker:
         self.max_distance = max_distance
         self.counting_mode = counting_mode
         self.count_min_hits = max(1, int(count_min_hits))
+        self.count_direction = (count_direction or "any").lower()
         
         self.tracks: List[Track] = []
         self.next_id = 1
@@ -142,7 +171,11 @@ class FingerlingTracker:
         self.counts: Dict[str, int] = defaultdict(int)
         self.counting_line: Optional[Tuple[int, int, int, int]] = None
         self.counting_line_orientation: str = "horizontal"
-    
+
+        # One entry per counted fish, waiting to be collected by drain_events().
+        self._pending_events: List[Dict[str, Any]] = []
+        self._event_seq = 0
+
     def update(self, detections: List[Dict[str, Any]]) -> List[Track]:
         """
         Update tracks with new detections.
@@ -204,23 +237,10 @@ class FingerlingTracker:
         self,
         detections: List[Dict[str, Any]]
     ) -> np.ndarray:
-        """Compute cost matrix based on center distances."""
-        n_tracks = len(self.tracks)
-        n_dets = len(detections)
-        
-        cost_matrix = np.full((n_tracks, n_dets), self.max_distance * 2)
-        
-        for t_idx, track in enumerate(self.tracks):
-            predicted = track.predict()
-            for d_idx, det in enumerate(detections):
-                det_center = det['center']
-                distance = np.sqrt(
-                    (predicted[0] - det_center[0]) ** 2 +
-                    (predicted[1] - det_center[1]) ** 2
-                )
-                cost_matrix[t_idx, d_idx] = distance
-        
-        return cost_matrix
+        """Compute cost matrix: distance from each track's predicted centre to each detection."""
+        predicted = np.array([t.predict() for t in self.tracks], dtype=float).reshape(-1, 2)
+        centers = np.array([d['center'] for d in detections], dtype=float).reshape(-1, 2)
+        return np.linalg.norm(predicted[:, None, :] - centers[None, :, :], axis=2)
     
     def _compute_iou(
         self,
@@ -256,7 +276,9 @@ class FingerlingTracker:
             size_color=detection.get('size_color', (128, 128, 128)),
             estimated_length_mm=detection.get('estimated_length_mm', 0.0),
             confidence=detection.get('confidence', 0.0),
-            history=[detection['center']]
+            conf_sum=float(detection.get('confidence', 0.0)),
+            history=[detection['center']],
+            class_votes=Counter([detection.get('class_name', 'unknown')])
         )
         self.tracks.append(track)
         self.next_id += 1
@@ -285,45 +307,60 @@ class FingerlingTracker:
         """
         self.counting_line = (x1, y1, x2, y2)
         self.counting_line_orientation = orientation
-    
+        valid = {"horizontal": ("down", "up", "any"), "vertical": ("right", "left", "any")}
+        if self.count_direction not in valid.get(orientation, ()):
+            print(f"Warning: count_direction '{self.count_direction}' can never fire on a "
+                  f"{orientation} counting line; expected one of {valid.get(orientation)}.")
+
+    def _side_of_line(self, point: Tuple[int, int]) -> int:
+        """-1 if the point is before the line (above / left of it), +1 if on or after it."""
+        x1, y1, x2, y2 = self.counting_line
+        if self.counting_line_orientation == "horizontal":
+            return 1 if point[1] >= (y1 + y2) // 2 else -1
+        return 1 if point[0] >= (x1 + x2) // 2 else -1
+
     def _check_line_crossings(self) -> None:
-        """Check if any tracks crossed the counting line."""
+        """
+        Count each confirmed track once, when it has been seen on both sides of
+        the line and is currently on the side the flow goes to.
+
+        The earlier rule compared only the last two positions of a track that
+        was already confirmed. A fish that crossed during its first
+        `min_hits` detections, which is common at CPU frame rates, was
+        therefore never counted. Remembering every side a track has been seen
+        on fixes that, and it still rejects static false positives, which
+        never change side.
+        """
         if self.counting_line is None:
             return
-        
-        x1, y1, x2, y2 = self.counting_line
-        
+
+        horizontal = self.counting_line_orientation == "horizontal"
+
         for track in self.tracks:
-            if track.counted or len(track.history) < 2:
+            if track.time_since_update > 0:
+                continue  # no fresh position this frame
+
+            side = self._side_of_line(track.center)
+            track.sides_seen.add(side)
+
+            if track.counted or not track.is_confirmed(self.min_hits):
                 continue
-            
-            if not track.is_confirmed(self.min_hits):
+            if len(track.sides_seen) < 2:
                 continue
-            
-            prev_pos = track.history[-2]
-            curr_pos = track.history[-1]
-            
-            crossed = False
-            
-            if self.counting_line_orientation == "horizontal":
-                # Check vertical crossing of horizontal line
-                line_y = (y1 + y2) // 2
-                if (prev_pos[1] < line_y <= curr_pos[1] or
-                    prev_pos[1] > line_y >= curr_pos[1]):
-                    crossed = True
+
+            # Seen on both sides and now on `side`, so it crossed towards `side`.
+            if horizontal:
+                direction = "down" if side == 1 else "up"
             else:
-                # Check horizontal crossing of vertical line
-                line_x = (x1 + x2) // 2
-                if (prev_pos[0] < line_x <= curr_pos[0] or
-                    prev_pos[0] > line_x >= curr_pos[0]):
-                    crossed = True
-            
-            if crossed:
-                track.counted = True
-                track.get_direction()
-                class_key = track.class_name or 'unknown'
-                self.counts[class_key] += 1
-                self.counts['total'] += 1
+                direction = "right" if side == 1 else "left"
+
+            # Direction gate: a fish carried back upstream must not be counted,
+            # and a static background false positive that drifts across the line
+            # is rejected unless it moves the way the flow does.
+            if self.count_direction != "any" and direction != self.count_direction:
+                continue
+
+            self._record_count(track, direction)
 
     def _count_unique_tracks(self) -> None:
         """Count each track once after it reaches the configured hit threshold."""
@@ -334,20 +371,52 @@ class FingerlingTracker:
             if track.hits < self.count_min_hits:
                 continue
 
-            track.counted = True
-            class_key = track.class_name or 'unknown'
-            self.counts[class_key] += 1
-            self.counts['total'] += 1
-    
+            self._record_count(track, None)
+
+    def _record_count(self, track: Track, direction: Optional[str]) -> None:
+        """Add a track to the counts and queue a per-fish audit event."""
+        track.counted = True
+        track.direction = direction
+        class_key = track.get_voted_class() or 'unknown'
+        self.counts[class_key] += 1
+        self.counts['total'] += 1
+
+        self._event_seq += 1
+        self._pending_events.append({
+            'seq': self._event_seq,
+            'frame': self.frame_count,
+            'track_id': track.track_id,
+            'class': class_key,
+            'votes': dict(track.class_votes),
+            'hits': track.hits,
+            'mean_confidence': round(track.mean_confidence, 4),
+            'direction': direction or '',
+            'bbox': [int(v) for v in track.bbox],
+        })
+
+    def drain_events(self) -> List[Dict[str, Any]]:
+        """Return the count events recorded since the last call, and clear them."""
+        events, self._pending_events = self._pending_events, []
+        return events
+
     def get_counts(self) -> Dict[str, int]:
         """Get current counts by size category."""
         return dict(self.counts)
-    
+
     def reset_counts(self) -> None:
-        """Reset all counts and per-track counted flags."""
+        """
+        Reset all counts and per-track counted flags.
+
+        Each live track forgets the sides it has already visited, so a fish
+        already past the line is not counted again straight after the reset.
+        """
         self.counts.clear()
+        self._pending_events.clear()
         for track in self.tracks:
             track.counted = False
+            track.sides_seen = (
+                {self._side_of_line(track.center)} if self.counting_line is not None else set()
+            )
     
     def get_active_tracks(self) -> List[Track]:
         """Get list of confirmed, active tracks."""

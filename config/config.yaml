@@ -6,8 +6,8 @@ model:
   engine: "ultralytics"
   weights: "best.pt"  # Path to trained weights
   pretrained: "yolov26n.pt"  # Preferred base checkpoint (falls back to yolov8n.pt if unavailable)
-  confidence_threshold: 0.15
-  iou_threshold: 0.45
+  confidence_threshold: 0.50
+  iou_threshold: 0.50
   device: "auto"  # "auto", "cuda", "cpu"
   dark_surface_filter:
     enabled: false
@@ -44,19 +44,26 @@ video:
 # Tracking Settings
 tracking:
   max_age: 30  # Maximum frames to keep track without detection
-  min_hits: 2  # Minimum hits before track is confirmed for active display/tracking
+  min_hits: 3  # Minimum hits before track is confirmed for active display/tracking
   iou_threshold: 0.3
   max_distance: 160  # Maximum pixel distance for association
 
 # Counting Settings
 counting:
-  mode: "unique_track"  # "unique_track" counts each tracked object once, "line_crossing" counts only crossings
-  count_min_hits: 2  # Number of detections before a track is added to cumulative total
+  mode: "line_crossing"  # "unique_track" counts each tracked object once, "line_crossing" counts only crossings
+  count_min_hits: 3  # Number of detections before a track is added to cumulative total
+  count_direction: "down"  # Only downstream crossings count: "down"/"right"/"up"/"left"/"any"
   # Line-based counting (for conveyor/channel setups)
   use_counting_line: true
   counting_line_position: 0.5  # Relative position (0-1) across frame
   counting_line_orientation: "horizontal"  # "horizontal" or "vertical"
-  
+
+  # Field calibration (see docs/HATCHERY_DEPLOYMENT.md, "Calibration").
+  # Reports show raw machine count AND raw x factor. Leave at 1.0 until you
+  # have hand-counted batches; get the value from scripts/calibrate.py.
+  count_correction_factor: 1.0
+  count_correction_note: "Uncalibrated: no hand-count batches recorded yet."
+
   # Region-based counting
   use_counting_region: false
   counting_region: [100, 100, 500, 400]  # [x1, y1, x2, y2]
@@ -93,3 +100,7 @@ output:
   output_path: "output"
   save_csv: true
   csv_path: "output/counts.csv"
+  # Per-run audit records: output/runs/<run_id>/{events.csv, summary.json, report.html, crops/}
+  save_runs: true
+  runs_dir: "output/runs"
+  save_event_crops: true  # small image of every counted fish, for spot checks and disputes

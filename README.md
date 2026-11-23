@@ -3,6 +3,12 @@
 > Real-time AI-powered detection, tracking, and classification of catfish
 > fingerlings by developmental stage — Fingerling · Post-Fingerling · Juvenile.
 
+> **Using it in a hatchery?** Run it on a laptop at the hatchery, offline, with a
+> fixed camera over the transfer channel: double-click `run_hatchery.bat`.
+> Setup, daily use, **calibration** and retraining are in
+> [docs/HATCHERY_DEPLOYMENT.md](docs/HATCHERY_DEPLOYMENT.md). The hosted Render free
+> tier below is a demo only: it is too slow to process real batch videos.
+
 ---
 
 ## Table of Contents
@@ -216,9 +222,13 @@ The script:
 | Variable | Value |
 |---|---|
 | `MODEL_PATH` | `models/best.onnx` |
-| `CONFIDENCE_THRESHOLD` | `0.25` |
 
 *(Render sets `PORT` automatically — do not add it manually.)*
+
+Detection and counting thresholds come **only** from `config/config.yaml`
+(validated setting: confidence 0.50, line crossing, downstream only). If an old
+`CONFIDENCE_THRESHOLD` variable is still set in the Render dashboard, delete it;
+the backend ignores it.
 
 ### Cold-Start Mitigation
 
@@ -267,7 +277,6 @@ Or permanently hard-code your Render URL in `frontend/index.html`
 | Variable | Service | Purpose |
 |---|---|---|
 | `MODEL_PATH` | Render | Path to ONNX file relative to repo root |
-| `CONFIDENCE_THRESHOLD` | Render | Detection threshold (0.0–1.0) |
 | `PORT` | Render | Auto-set by Render |
 
 ---
@@ -288,19 +297,26 @@ Base URL: `https://<render-service>.onrender.com`
 | `POST` | `/api/process_url` | Process from URL `{"url": "https://..."}` |
 | `POST` | `/api/start_camera` | Start webcam `{"camera_index": 0}` |
 | `POST` | `/api/stop` | Stop active processing |
-| `POST` | `/api/reset_counts` | Reset all counts to zero |
+| `POST` | `/api/reset_counts` | Reset all counts to zero (closes the current run record and starts a new one) |
+| `GET` | `/api/runs` | Saved run records, newest first (each run's `summary.json`) |
+| `GET` | `/api/runs/<run_id>/<file>` | `report.html`, `events.csv`, `summary.json`, `crops/…`; add `?download=1` to download |
+| `GET` | `/` | The dashboard itself (works offline: libraries are in `frontend/vendor/`) |
+
+Only one job runs at a time. Starting a job while one is running returns
+**HTTP 409**: stop the running count first. A running count is never silently replaced.
 
 ### Socket.IO Events (Server → Client)
 
 | Event | Payload |
 |---|---|
 | `update` | `{counts, active_tracks, fps, frame_number, source_type, is_live}` |
-| `processing_started` | `{source, type}` |
-| `processing_completed` | `{}` |
-| `processing_error` | `{error}` |
+| `processing_started` | `{source, type, job}` |
+| `processing_completed` | `{job}` |
+| `processing_error` | `{error, job}` |
 | `counts_reset` | `{}` |
+| `run_saved` | `{run_id, status, counts, corrected_total, warning, links}` |
 | `batch_results` | `{results[], batch_totals, total_files}` |
-| `batch_csv_saved` | `{csv_path}` |
+| `batch_csv_saved` | `{run_id, url}` |
 
 ---
 

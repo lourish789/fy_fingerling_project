@@ -20,8 +20,10 @@ sys.path.insert(0, str(_ROOT / 'src'))
 # ── Application ──────────────────────────────────────────────────────────────
 from app.counter import FingerlingCounter
 
+# Detection/counting thresholds come only from config/config.yaml, so the
+# deployed settings are always the validated ones. (A CONFIDENCE_THRESHOLD
+# env var used to be read here and silently ignored.)
 _model_path  = os.environ.get('MODEL_PATH', 'models/best.onnx')
-_conf_thresh = float(os.environ.get('CONFIDENCE_THRESHOLD', '0.25'))
 _port        = int(os.environ.get('PORT', '5000'))
 
 _counter = FingerlingCounter(

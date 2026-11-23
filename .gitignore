@@ -60,6 +60,10 @@ output/*.csv
 output/**/*.csv
 output/smoke_*
 output/sample_result.*
+# Per-run audit records (events, crops, reports) stay on the counting machine
+output/runs/
+# Background-frame candidates awaiting human review
+data/background_candidates/
 # Preserve directory placeholders
 !output/.gitkeep
 !output/batch_summaries/.gitkeep
@@ -78,12 +82,11 @@ logs/*.err.log
 notebooks/
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Local Test & Debug Scripts
+# Local Test & Debug Scripts (root-level scratch scripts only; keep tests/ tracked)
 # ─────────────────────────────────────────────────────────────────────────────
-test_*.py
-debug_*.py
-verify_*.py
-tests/
+/test_*.py
+/debug_*.py
+/verify_*.py
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Uploaded / Temporary Files

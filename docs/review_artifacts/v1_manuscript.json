@@ -1,0 +1,21 @@
+{
+ "summary": {
+  "video": "VID_20260617_151331.mp4",
+  "conf": 0.5,
+  "mode": "line_crossing",
+  "min_hits": 3,
+  "count_min_hits": 3,
+  "max_dist": 160,
+  "imgsz": 640,
+  "frames_processed": 2294,
+  "detections_total": 66,
+  "frames_with_detection": 66,
+  "mean_det_per_frame": 0.029,
+  "tracks_created": 15,
+  "COUNT_total": 0,
+  "per_class": {},
+  "wall_s": 303.8,
+  "mean_inference_ms": 122.8
+ },
+ "events": []
+}

@@ -9,8 +9,10 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+  <!-- Local copies (Socket.IO 4.7.4, Chart.js 4.4.2) so the dashboard works offline at the hatchery -->
+  <script src="vendor/socket.io.min.js"></script>
+  <script src="vendor/chart.umd.min.js"></script>
+  <script src="config.js"></script>
 
   <style>
     /* ════════════════════════════════════════════════════════════════
@@ -566,6 +568,30 @@
     .status-banner.success { display:flex; background:rgba(34,197,94,0.1);   border:1px solid rgba(34,197,94,0.28);   color:var(--green); }
     .status-banner.error   { display:flex; background:rgba(239,68,68,0.1);   border:1px solid rgba(239,68,68,0.28);   color:var(--danger); }
 
+    /* Last saved run: totals + download links */
+    .run-panel {
+      display: none;
+      margin: 0 20px 18px;
+      padding: 12px 14px;
+      border: 1px solid var(--border);
+      border-radius: var(--r-sm);
+      background: var(--card);
+      font-size: 0.79rem;
+      color: var(--t1);
+    }
+    .run-panel.active { display: block; }
+    .run-panel-head { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+    .run-panel-title { font-weight: 700; }
+    .run-panel-meta { color: var(--text-dim); font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; overflow-wrap: anywhere; }
+    .run-panel-total { font-size: 1.05rem; font-weight: 700; color: var(--accent); margin: 2px 0; }
+    .run-panel-warn { color: var(--danger); margin: 4px 0; }
+    .run-panel-links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+    .run-panel-links a {
+      color: var(--accent); text-decoration: none; border: 1px solid var(--border);
+      border-radius: 6px; padding: 4px 10px; font-weight: 600;
+    }
+    .run-panel-links a:hover { background: var(--card-h); }
+
     /* ════════════════════════════════════════════════════════════════
        RIGHT PANEL
        ════════════════════════════════════════════════════════════════ */
@@ -994,6 +1020,17 @@
           <span id="status-icon">ℹ</span>
           <span id="status-message">Ready</span>
         </div>
+
+        <div class="run-panel" id="run-panel" aria-live="polite">
+          <div class="run-panel-head">
+            <span class="run-panel-title">Last saved count</span>
+            <span class="run-panel-meta" id="run-panel-id"></span>
+          </div>
+          <div class="run-panel-total" id="run-panel-total"></div>
+          <div class="run-panel-meta" id="run-panel-classes"></div>
+          <div class="run-panel-warn" id="run-panel-warn"></div>
+          <div class="run-panel-links" id="run-panel-links"></div>
+        </div>
       </div>
 
     </div><!-- /left-panel -->
@@ -1098,7 +1135,9 @@
 <script>
 // ─── Config ────────────────────────────────────────────────────────────────
 const urlParams = new URLSearchParams(window.location.search);
+// Priority: ?backend=… → served by the backend itself (config.js) → local dev → hosted backend
 const API_BASE = urlParams.get('backend') ||
+  window.AQUACOUNT_API ||
   (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
     ? 'http://localhost:5000'
     : 'https://aquacount-backend.onrender.com');
@@ -1247,7 +1286,53 @@ socket.on('image_result', (data) => {
   }
 });
 socket.on('batch_results', renderBatchResults);
-socket.on('batch_csv_saved', (d) => showStatus('CSV saved: ' + d.csv_path, 'success'));
+socket.on('batch_csv_saved', (d) => {
+  showRunPanel({
+    run_id: d.run_id,
+    title: 'Batch images',
+    links: { 'Batch summary (CSV)': d.url },
+  });
+});
+socket.on('run_saved', (d) => {
+  const c = d.counts || {};
+  const classes = ['fingerling', 'post_fingerling', 'juvenile', 'unknown']
+    .filter(k => c[k])
+    .map(k => k.replace('_', '-') + ' ' + c[k])
+    .join(' · ');
+  let total = 'Total counted: ' + (c.total || 0);
+  if (d.corrected_total !== null && d.corrected_total !== undefined) {
+    total += '  (calibrated estimate ' + d.corrected_total + ')';
+  }
+  showRunPanel({
+    run_id: d.run_id + ' · ' + (d.status || ''),
+    total,
+    classes,
+    warning: d.warning || '',
+    links: {
+      'Report': d.links.report,
+      'Fish log (CSV)': d.links.events_csv,
+      'Summary (JSON)': d.links.summary_json,
+    },
+  });
+});
+
+function showRunPanel(info) {
+  document.getElementById('run-panel').classList.add('active');
+  document.getElementById('run-panel-id').textContent = info.run_id || '';
+  document.getElementById('run-panel-total').textContent = info.total || info.title || '';
+  document.getElementById('run-panel-classes').textContent = info.classes || '';
+  document.getElementById('run-panel-warn').textContent = info.warning || '';
+  const links = document.getElementById('run-panel-links');
+  links.replaceChildren();
+  Object.entries(info.links || {}).forEach(([label, href]) => {
+    const a = document.createElement('a');
+    a.href = API_BASE + href;
+    a.target = '_blank';
+    a.rel = 'noopener';
+    a.textContent = label;
+    links.appendChild(a);
+  });
+}
 
 // ─── Stat Helpers ───────────────────────────────────────────────────────────
 function setStatVal(id, val) {
@@ -1326,8 +1411,16 @@ function uploadFile() {
   if (!file) { showStatus('Please select a file.', 'error'); return; }
   const form = new FormData();
   form.append('file', file);
-  showStatus('Uploading ' + file.name + '…', 'info');
-  fetch(API_BASE + '/api/upload', { method:'POST', body: form })
+  // Check first, so a large video is not uploaded only to be refused.
+  fetch(API_BASE + '/api/status')
+    .then(r => r.json())
+    .then(st => {
+      if (st.is_processing) {
+        throw new Error('A count is already running. Stop it before starting another.');
+      }
+      showStatus('Uploading ' + file.name + '…', 'info');
+      return fetch(API_BASE + '/api/upload', { method:'POST', body: form });
+    })
     .then(r => r.json())
     .then(d => {
       if (d.success) showStatus('Uploaded. Processing…', 'info');
