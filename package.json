@@ -1,0 +1,8 @@
+{
+  "name": "aquacount",
+  "private": true,
+  "description": "Not a Node project: Vercel reads the Node.js version for building web/ from here. The web app is in web/ (see web/package.json).",
+  "engines": {
+    "node": "22.x"
+  }
+}
