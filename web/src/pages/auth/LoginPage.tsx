@@ -6,6 +6,8 @@ import { GoogleButton } from '../../components/GoogleButton'
 import { BrandLockup } from '../../components/BrandMark'
 import { Button, Callout, PasswordField, TextField } from '../../components/ui/primitives'
 import { useCountdown } from './AuthLayout'
+import { DEMO } from '../../lib/config'
+import { DEMO_EMAIL, DEMO_PASSWORD } from '../../demo/registry'
 
 const REASONS: Record<string, string> = {
   expired: 'Your session ended. Sign in again to carry on where you left off.',
@@ -62,11 +64,20 @@ export function LoginPage() {
       </div>
 
       {reason && REASONS[reason] && <Callout tone="info" icon={<Info />}>{REASONS[reason]}</Callout>}
+      {DEMO && (
+        <div className="demo-account">
+          <div className="small secondary">Demo account: <strong className="mono">{DEMO_EMAIL}</strong> / <strong className="mono">{DEMO_PASSWORD}</strong>, or create your own.</div>
+          <Button variant="outline" block loading={busy} onClick={async () => {
+            setEmail(DEMO_EMAIL); setPassword(DEMO_PASSWORD); setBusy(true)
+            try { await login(DEMO_EMAIL, DEMO_PASSWORD, true) } catch (err) { fail(err); setBusy(false) }
+          }}>Use the demo account</Button>
+        </div>
+      )}
       {errors.form && <Callout tone="danger" icon={<TriangleAlert />}>{errors.form}{wait > 0 && <> Try again in <strong className="num">{wait}s</strong>.</>}</Callout>}
 
-      {config?.google_client_id && (
+      {(config?.google_client_id || DEMO) && (
         <>
-          <GoogleButton clientId={config.google_client_id} onCredential={onGoogle} disabled={busy} />
+          <GoogleButton clientId={config?.google_client_id} onCredential={onGoogle} disabled={busy} />
           <div className="divider-label">or with email</div>
         </>
       )}

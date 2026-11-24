@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Outlet } from 'react-router-dom'
 import { FileCheck2, ScanLine, Users } from 'lucide-react'
 import { BrandLockup } from '../../components/BrandMark'
+import { DemoBanner } from '../../components/DemoBanner'
 
 /** Decorative: fish passing single-file over the counting line. */
 function ChannelArt() {
@@ -46,6 +47,7 @@ export function AuthLayout() {
         </div>
       </aside>
       <main className="auth-main">
+        <div className="auth-demo"><DemoBanner /></div>
         <Outlet />
       </main>
     </div>

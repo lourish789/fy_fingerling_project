@@ -7,6 +7,7 @@ import { BrandLockup } from '../../components/BrandMark'
 import { Button, Callout, EmptyState, PasswordField, TextField } from '../../components/ui/primitives'
 import { passwordStrength } from '../../lib/format'
 import { useCountdown } from './AuthLayout'
+import { DEMO } from '../../lib/config'
 
 const STRENGTH_LABEL = ['', 'Too short', 'Okay', 'Good', 'Strong']
 
@@ -72,9 +73,9 @@ export function SignupPage() {
 
       {errors.form && <Callout tone="danger" icon={<TriangleAlert />}>{errors.form}{wait > 0 && <> Try again in <strong className="num">{wait}s</strong>.</>}</Callout>}
 
-      {config?.google_client_id && (
+      {(config?.google_client_id || DEMO) && (
         <>
-          <GoogleButton clientId={config.google_client_id} onCredential={onGoogle} text="signup_with" disabled={busy} />
+          <GoogleButton clientId={config?.google_client_id} onCredential={onGoogle} text="signup_with" disabled={busy} />
           <div className="divider-label">or with email</div>
         </>
       )}

@@ -127,6 +127,7 @@ node_modules/
 .next/
 .nuxt/
 dist/
+dist-demo/
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Large Video / Image Test Files at Root

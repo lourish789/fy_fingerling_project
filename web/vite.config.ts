@@ -7,13 +7,20 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, '.', '')
   const backend = env.VITE_DEV_BACKEND || 'http://localhost:5000'
 
-  // On Vercel the app and the API live on different hosts: without VITE_API_URL the
-  // deployed app would call itself for counts and uploads. Fail the build instead.
-  if (mode === 'production' && env.VERCEL === '1' && !env.VITE_API_URL) {
+  // Demo mode: the whole app runs in the browser with a simulated station and sample
+  // data (no backend, no database). On for `--mode demo`, and for Vercel *preview*
+  // builds that have no backend configured, so every branch preview is clickable.
+  const onVercel = env.VERCEL === '1'
+  const demo = env.VITE_DEMO === '1' || (onVercel && env.VERCEL_ENV !== 'production' && !env.VITE_API_URL)
+
+  // Production on Vercel: the app and the API live on different hosts, so without
+  // VITE_API_URL the app would call itself for counts and uploads. Fail instead.
+  if (onVercel && env.VERCEL_ENV === 'production' && !env.VITE_API_URL && !demo) {
     throw new Error('Set VITE_API_URL (e.g. https://aquacount-backend.onrender.com) in the Vercel project settings.')
   }
 
   return {
+    define: { 'import.meta.env.VITE_DEMO': JSON.stringify(demo ? '1' : '') },
     plugins: [
       react(),
       VitePWA({

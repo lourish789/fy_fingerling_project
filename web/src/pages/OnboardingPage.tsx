@@ -7,6 +7,7 @@ import { applyTheme } from '../lib/theme'
 import { CLASS_LABEL, GRADED_CLASSES } from '../lib/format'
 import type { Preferences, SetupType, Theme, User } from '../lib/types'
 import { BrandLockup } from '../components/BrandMark'
+import { DemoBanner } from '../components/DemoBanner'
 import { Button, Callout, Segmented, TextField, cx } from '../components/ui/primitives'
 import { TriangleAlert } from 'lucide-react'
 
@@ -61,6 +62,7 @@ export function OnboardingPage() {
 
   return (
     <div className="onboarding">
+      <DemoBanner />
       <header className="onboarding-head">
         <div className="row"><BrandLockup sub={false} /></div>
         <button className="link-btn small" onClick={() => finish(true)} disabled={busy}>Skip for now</button>

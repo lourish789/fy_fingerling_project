@@ -362,7 +362,7 @@ export function CountPage() {
           <Card title={station.isProcessing ? 'Count in progress' : 'Choose a source'}
             action={station.isProcessing ? <Badge tone="live">Counting</Badge> : undefined}>
             <div className="stack">
-              <Segmented<SourceKind> label="Source" value={source} onChange={chooseSource}
+              <Segmented<SourceKind> stacked label="Source" value={source} onChange={chooseSource}
                 options={SOURCES.map((s) => ({ value: s.value, label: s.label, icon: s.icon }))} />
               {station.isProcessing && <p className="small secondary">Stop the current count before starting another.</p>}
               {source === 'camera' && <CameraForm disabled={disabled} onStart={async (i) => {

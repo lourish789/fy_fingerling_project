@@ -121,7 +121,8 @@ select.input { appearance: none; background-image: linear-gradient(45deg, transp
   font-size: var(--text-sm); font-weight: var(--weight-semibold); color: var(--text-2);
   transition: background var(--dur-fast), color var(--dur-fast);
 }
-.segmented button svg { width: 17px; height: 17px; }
+.segmented button svg { width: 17px; height: 17px; flex: none; }
+.segmented.stacked button { flex-direction: column; gap: 3px; min-height: 54px; padding: 0 4px; font-size: var(--text-xs); }
 .segmented button:hover { color: var(--text-1); }
 .segmented button[aria-pressed='true'], .segmented button[aria-selected='true'] { background: var(--surface-1); color: var(--text-1); box-shadow: var(--shadow-1); }
 :root[data-theme='dark'] .segmented button[aria-pressed='true'],

@@ -8,9 +8,16 @@ import './styles/components.css'
 import './styles/layout.css'
 import './styles/pages.css'
 import { App } from './App'
+import { DEMO } from './lib/config'
+import { setDemoBackend } from './demo/registry'
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-)
+async function start() {
+  // Demo builds only: the in-browser stand-in for the server (dropped from normal builds).
+  if (DEMO) setDemoBackend(await import('./demo/backend'))
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <App />
+    </StrictMode>,
+  )
+}
+void start()

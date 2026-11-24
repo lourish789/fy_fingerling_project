@@ -14,6 +14,7 @@ import { useToast } from '../ui/feedback'
 import { PageMetaContext, type PageMeta } from './pageMeta'
 import { SIDEBAR_PRIMARY, SIDEBAR_SECONDARY, TAB_ITEMS } from './navigation'
 import { useOnline } from '../../hooks/useOnline'
+import { DemoBanner } from '../DemoBanner'
 
 /* ── Connection chip ────────────────────────────────────────────────────── */
 const CONN_LABEL: Record<Connection, string> = { connecting: 'Connecting', live: 'Live', reconnecting: 'Reconnecting', offline: 'Offline' }
@@ -219,6 +220,7 @@ export function AppShell() {
         <div className="shell">
           <Sidebar onOpenDrawer={openDrawer} />
           <div className="shell-main">
+            <DemoBanner />
             <OfflineBanner />
             <TopBar meta={meta} onOpenDrawer={openDrawer} />
             <main id="main" tabIndex={-1}>

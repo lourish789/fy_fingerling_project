@@ -1,5 +1,12 @@
 import { API_BASE, AUTH_BASE } from './config'
 import { accessTokenStale, getAccessToken } from './token'
+import { demoBackend } from '../demo/registry'
+
+/** fetch, or the in-browser demo server in demo builds. */
+function send(url: string, init: RequestInit): Promise<Response> {
+  const demo = demoBackend()
+  return demo ? demo.demoFetch(url, init) : fetch(url, init)
+}
 
 /** Custom header the backend requires on cookie-authenticated calls (blocks cross-site form posts). */
 export const CLIENT_HEADER = { 'X-AquaCount-Client': 'web' }
@@ -104,7 +111,7 @@ export async function api<T = unknown>(path: string, opts: RequestOptions = {}):
 
     let res: Response
     try {
-      res = await fetch(base + path, {
+      res = await send(base + path, {
         method,
         headers,
         body: opts.json !== undefined ? JSON.stringify(opts.json) : opts.body,

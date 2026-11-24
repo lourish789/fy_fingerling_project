@@ -220,6 +220,17 @@ on the laptop itself (`localhost`).
 > cache it offline. For that, serve it over HTTPS (for example a local reverse proxy
 > with a certificate).
 
+**Demo mode (no server, no database)**
+
+`npm run dev:demo` or `npm run build:demo` runs the whole app in the browser: a
+simulated station (synthetic fish crossing the line, in the real overlay's style),
+sample history, and a demo account (`demo@aquacount.app` / `fingerlings`). Nothing is
+sent anywhere, and a banner says so on every screen. Vercel **preview** deployments
+(any branch other than production) build in demo mode automatically when
+`VITE_API_URL` is not set, so every branch gets a clickable preview. Production
+builds never fall back to demo mode. The demo code (`web/src/demo/`) is loaded only in
+demo builds; normal builds do not contain it.
+
 **Cloud (Render + Vercel)**
 
 1. **Database:** create a free Postgres (Neon, Supabase or Render Postgres). Put its

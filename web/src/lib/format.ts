@@ -93,6 +93,15 @@ export function dayGroup(iso: string | null | undefined, now = new Date()): stri
   return dayFmt.format(d)
 }
 
+/** "Today, 3:09 PM", "Yesterday, 8:39 AM", "20 Nov, 3:16 PM". */
+export function formatDayTime(iso: string | null | undefined, now = new Date()): string {
+  const d = parseDate(iso)
+  if (!d) return '—'
+  const g = dayGroup(iso, now)
+  const day = g === 'Today' || g === 'Yesterday' ? g : shortDayFmt.format(d)
+  return `${day}, ${timeFmt.format(d)}`
+}
+
 const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' })
 export function formatRelative(iso: string | null | undefined, now = Date.now()): string {
   const d = parseDate(iso)

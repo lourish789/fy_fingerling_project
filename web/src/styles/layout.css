@@ -210,3 +210,11 @@
 .fullscreen-state { min-height: 100dvh; display: grid; place-items: center; padding: var(--gutter); }
 .fullscreen-state .state { max-width: 420px; }
 .boot-mark { width: 56px; height: 56px; animation: pulse 1.6s ease-in-out infinite; }
+
+/* ── Demo preview ───────────────────────────────────────────────────────── */
+.banner-demo { background: var(--accent-soft); color: var(--accent); flex-wrap: wrap; row-gap: 2px; }
+.banner-demo span { color: var(--text-2); }
+.auth-demo { width: 100%; max-width: 400px; margin-bottom: var(--space-4); border-radius: var(--radius-sm); overflow: hidden; }
+.auth-demo:empty { display: none; }
+.demo-account { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3) var(--space-4); border: 1px dashed var(--border-strong); border-radius: var(--radius-md); }
+.btn-google { background: var(--surface-1); }

@@ -10,6 +10,7 @@ import { uploadWithProgress, type UploadHandle } from '../lib/upload'
 import type { BatchResultItem, Counts, JobInfo, RunKind, StationStatus } from '../lib/types'
 import { useToast } from '../components/ui/feedback'
 import { useAuth } from '../auth/AuthProvider'
+import { demoBackend } from '../demo/registry'
 
 export type Connection = 'connecting' | 'live' | 'reconnecting' | 'offline'
 
@@ -113,7 +114,8 @@ export function StationProvider({ children }: { children: ReactNode }) {
 
   // ── Socket lifecycle ─────────────────────────────────────────────────────
   useEffect(() => {
-    const socket = io(API_BASE || undefined, {
+    const demo = demoBackend()
+    const socket = demo ? (demo.createDemoSocket() as unknown as Socket) : io(API_BASE || undefined, {
       path: '/socket.io',
       transports: ['polling'], // works through every proxy (Render, Vercel, hatchery Wi-Fi)
       upgrade: false,

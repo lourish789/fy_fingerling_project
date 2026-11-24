@@ -10,6 +10,7 @@ import {
   CLASS_KEYS, CLASS_LABEL, RUN_KIND_LABEL, formatBytes, formatDateTime, formatDuration, formatNumber, normaliseCounts,
 } from '../lib/format'
 import type { RunDetail } from '../lib/types'
+import { demoBackend } from '../demo/registry'
 
 const SETTING_LABELS: Record<string, string> = {
   model_file: 'Model file',
@@ -59,7 +60,8 @@ export function RunDetailPage() {
     return fresh.media_token
   }, [d, runId, detail])
 
-  const fileUrl = (path: string, token: string, download = false) =>
+  const demo = demoBackend()
+  const fileUrl = (path: string, token: string, download = false) => demo ? demo.demoFileUrl(runId, path) :
     apiUrl(`/api/runs/${encodeURIComponent(runId)}/${path}?t=${encodeURIComponent(token)}${download ? '&download=1' : ''}`)
 
   const openFile = async (name: string, download: boolean) => {
@@ -70,7 +72,7 @@ export function RunDetailPage() {
     const token = await mediaToken()
     const url = fileUrl(name, token, download)
     if (win) win.location.href = url
-    else if (download) { const a = document.createElement('a'); a.href = url; a.rel = 'noopener'; document.body.appendChild(a); a.click(); a.remove() }
+    else if (download) { const a = document.createElement('a'); a.href = url; a.download = name; a.rel = 'noopener'; document.body.appendChild(a); a.click(); a.remove() }
     else window.location.href = url
   }
 

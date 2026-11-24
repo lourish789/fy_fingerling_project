@@ -134,9 +134,9 @@ export function Switch({ checked, onChange, label, description, disabled }: { ch
 
 /* ── Segmented control ──────────────────────────────────────────────────── */
 export interface SegmentOption<T extends string> { value: T; label: ReactNode; icon?: ReactNode; disabled?: boolean }
-export function Segmented<T extends string>({ value, onChange, options, label, compact }: { value: T; onChange: (v: T) => void; options: SegmentOption<T>[]; label: string; compact?: boolean }) {
+export function Segmented<T extends string>({ value, onChange, options, label, compact, stacked }: { value: T; onChange: (v: T) => void; options: SegmentOption<T>[]; label: string; compact?: boolean; stacked?: boolean }) {
   return (
-    <div className={cx('segmented', compact && 'compact')} role="group" aria-label={label}>
+    <div className={cx('segmented', compact && 'compact', stacked && 'stacked')} role="group" aria-label={label}>
       {options.map((o) => (
         <button key={o.value} type="button" aria-pressed={o.value === value} disabled={o.disabled} onClick={() => onChange(o.value)}>
           {o.icon}{o.label}

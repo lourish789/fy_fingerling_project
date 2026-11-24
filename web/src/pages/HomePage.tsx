@@ -122,7 +122,7 @@ export function HomePage() {
             {recent.loading ? <SkeletonList rows={4} />
               : recent.error ? <ErrorState icon={<CircleAlert />} message={recent.error.message} onRetry={recent.reload} />
               : recent.data && recent.data.runs.length ? (
-                <div className="list">{recent.data.runs.map((r) => <RunRow key={r.run_id} run={r} />)}</div>
+                <div className="list">{recent.data.runs.map((r) => <RunRow key={r.run_id} run={r} showDay />)}</div>
               ) : (
                 <EmptyState icon={<Fish />} title="No counts yet" action={<Link to="/count" className="btn btn-primary">Start your first count</Link>}>
                   Every count you run is saved here with its report and fish log.

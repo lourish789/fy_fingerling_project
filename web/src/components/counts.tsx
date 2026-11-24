@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { Camera, ChevronRight, Image as ImageIcon, Images, Link2, Video } from 'lucide-react'
-import { CLASS_KEYS, CLASS_LABEL, RUN_KIND_LABEL, STATUS_LABEL, classShares, formatNumber, formatPercent, formatTime, normaliseCounts, statusTone } from '../lib/format'
+import { CLASS_KEYS, CLASS_LABEL, RUN_KIND_LABEL, STATUS_LABEL, classShares, formatDayTime, formatNumber, formatPercent, formatTime, normaliseCounts, statusTone } from '../lib/format'
 import type { ClassKey, Counts, RunKind, RunRecord } from '../lib/types'
 import { Badge, cx } from './ui/primitives'
 
@@ -77,7 +77,7 @@ export function StatusBadge({ status }: { status: string }) {
 }
 
 /* ── Run row (history, recent activity) ─────────────────────────────────── */
-export function RunRow({ run, showOwner }: { run: RunRecord; showOwner?: boolean }) {
+export function RunRow({ run, showOwner, showDay }: { run: RunRecord; showOwner?: boolean; showDay?: boolean }) {
   const counts = normaliseCounts({ ...run.counts, total: run.total })
   return (
     <Link to={`/history/${encodeURIComponent(run.run_id)}`} className="list-item run-row">
@@ -87,7 +87,7 @@ export function RunRow({ run, showOwner }: { run: RunRecord; showOwner?: boolean
           <span className="truncate" style={{ fontWeight: 600 }}>{run.source || RUN_KIND_LABEL[run.kind]}</span>
         </div>
         <div className="row small muted" style={{ gap: 8, flexWrap: 'wrap' }}>
-          <span className="num">{formatTime(run.started_at || run.created_at)}</span>
+          <span className="num">{showDay ? formatDayTime(run.started_at || run.created_at) : formatTime(run.started_at || run.created_at)}</span>
           <span aria-hidden>·</span>
           <span>{RUN_KIND_LABEL[run.kind] ?? run.kind}</span>
           {showOwner && run.owner && (<><span aria-hidden>·</span><span className="truncate">{run.owner.name}</span></>)}

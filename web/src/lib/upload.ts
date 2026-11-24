@@ -1,6 +1,7 @@
 import { ApiError, CLIENT_HEADER } from './api'
 import { API_BASE } from './config'
 import { getAccessToken } from './token'
+import { demoBackend } from '../demo/registry'
 
 export interface UploadHandle<T> {
   promise: Promise<T>
@@ -13,6 +14,8 @@ export interface UploadHandle<T> {
  * never uploaded twice just to recover from an expired token.
  */
 export function uploadWithProgress<T = unknown>(path: string, form: FormData, onProgress?: (fraction: number) => void): UploadHandle<T> {
+  const demo = demoBackend()
+  if (demo) return demoUpload<T>(demo.demoFetch, path, form, onProgress)
   const xhr = new XMLHttpRequest()
   const promise = new Promise<T>((resolve, reject) => {
     xhr.open('POST', API_BASE + path)
@@ -33,4 +36,21 @@ export function uploadWithProgress<T = unknown>(path: string, form: FormData, on
     xhr.send(form)
   })
   return { promise, abort: () => xhr.abort() }
+}
+
+/** Demo builds: pretend to upload (with progress), then hand the form to the demo server. */
+function demoUpload<T>(demoFetch: (u: string, i: RequestInit) => Promise<Response>, path: string, form: FormData, onProgress?: (f: number) => void): UploadHandle<T> {
+  let aborted = false
+  const promise = (async () => {
+    for (let i = 1; i <= 10; i++) {
+      await new Promise((r) => setTimeout(r, 110))
+      if (aborted) throw new ApiError('Upload cancelled.', 0, 'aborted')
+      onProgress?.(i / 10)
+    }
+    const res = await demoFetch(path, { method: 'POST', body: form })
+    const body = await res.json()
+    if (!res.ok) throw new ApiError(body.error ?? 'Upload failed.', res.status, body.code ?? 'error')
+    return body as T
+  })()
+  return { promise, abort: () => { aborted = true } }
 }
