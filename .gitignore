@@ -102,6 +102,8 @@ tmp/
 .env.local
 .env.*.local
 *.secret
+# Accounts database (SQLite) and the generated token-signing key
+instance/
 
 # ─────────────────────────────────────────────────────────────────────────────
 # OS Files
@@ -137,5 +139,7 @@ dist/
 *.jpeg
 *.png
 *.bmp
+# Web app icons are source assets, not test images
+!web/public/**/*.png
 # But keep the fish-fingerling zip dataset exclusion explicit:
 fish-fingerling.v1i.coco.zip

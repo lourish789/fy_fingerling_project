@@ -9,6 +9,12 @@
 > [docs/HATCHERY_DEPLOYMENT.md](docs/HATCHERY_DEPLOYMENT.md). The hosted Render free
 > tier below is a demo only: it is too slow to process real batch videos.
 
+> **Web app & accounts (v2).** The dashboard is now a mobile-first installable web
+> app (`web/`) with sign-in (email/password or Google), per-user count history,
+> insights and an admin view. Every API route except `/api/health` needs a signed-in
+> user. Architecture, setup, Google sign-in and deployment:
+> [docs/WEB_APP.md](docs/WEB_APP.md).
+
 ---
 
 ## Table of Contents
@@ -31,12 +37,12 @@
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
 │                         BROWSER / CLIENT                             │
-│   frontend/index.html  (served by Vercel CDN — free tier)           │
+│   web/  React PWA (Vercel CDN, or served by the backend offline)    │
 │   ┌──────────────────┐   ┌────────────────────────────────────────┐  │
-│   │  Video Feed      │   │  Stats Dashboard  (Chart.js counters)  │  │
-│   │  + Digital Zoom  │   │  Batch Results   Live Indicator        │  │
+│   │  Live count      │   │  Home · History · Insights · Profile   │  │
+│   │  (annotated feed)│   │  Settings · Admin   (signed-in users)  │  │
 │   └────────┬─────────┘   └────────────────────────────────────────┘  │
-│            │  MJPEG stream               ↑ Socket.IO (WS/polling)   │
+│            │  REST + Bearer token        ↑ Socket.IO (polling)      │
 └────────────┼──────────────────────────────────────────────────────────┘
              │                             │
              ▼                             │
@@ -67,7 +73,8 @@
 |---|---|
 | ONNX Runtime instead of PyTorch | PyTorch ≈ 1.8 GB; ONNX Runtime ≈ 150 MB — fits Render's 512 MB RAM and lightweight hatchery laptops |
 | `gthread` worker in Gunicorn | Built-in threaded worker pairs cleanly with Flask-SocketIO `async_mode='threading'` (no `eventlet` needed) |
-| Vendored frontend libraries | Socket.IO and Chart.js live in `frontend/vendor/` so the hatchery dashboard works 100% offline |
+| Web app built into `web/dist` | The backend serves the built PWA (fonts and libraries bundled, service worker cache), so the hatchery app works 100% offline |
+| Accounts in `src/api` | Short-lived access tokens + rotating refresh cookie; SQLite offline, Postgres hosted |
 | Socket.IO polling transport | Works through Render's reverse proxy without WebSocket upgrade issues |
 | Thin bounding boxes (1 px) | Discrete overlays that don't obscure the fish being examined |
 | Stats overlay = counts only | Frame number, FPS, and telemetry removed from video; shown in dashboard |
@@ -78,9 +85,12 @@
 
 ```
 fingerling_counting_model/
-├── frontend/
-│   └── index.html              ← Modernised engineering dashboard (Vercel)
+├── web/                        ← Mobile-first PWA (React + TypeScript + Vite)
+│   ├── src/pages/              ← Login, sign-up, onboarding, home, count, history,
+│   │                              run detail, insights, profile, settings, admin
+│   └── src/components/         ← Design system, layout shell, nav bars, auth guards
 ├── src/
+│   ├── api/                    ← Accounts, sessions, run history, insights, admin
 │   ├── app/
 │   │   └── counter.py          ← FingerlingCounter — main application class
 │   ├── models/
@@ -144,10 +154,10 @@ python scripts/convert_to_onnx.py --weights models/best.pt
 # 6. Run the web server locally
 python main.py --web-server --port 5000
 
-# 7. Serve the frontend
-python -m http.server 8080 --directory frontend
-# Then open:  http://localhost:8080
-# The frontend auto-detects localhost and connects to http://localhost:5000
+# 7. Web app, with hot reload (proxies /api and /socket.io to port 5000)
+cd web && npm ci && npm run dev
+# Then open:  http://localhost:5173   (create the first account: it becomes admin)
+# Or build once and let the backend serve it:  npm run build  -> http://localhost:5000
 ```
 
 ### CLI Quick Reference
@@ -214,7 +224,7 @@ The script:
 | Runtime | Python 3 |
 | Build Command | `pip install -r requirements-prod.txt` |
 | Start Command | `gunicorn --worker-class gthread --workers 1 --threads 4 --bind 0.0.0.0:$PORT --timeout 120 "src.streaming.wsgi:app"` |
-| Health Check Path | `/api/status` |
+| Health Check Path | `/api/health` |
 | Plan | Free |
 
 ### Environment Variables (set in Render dashboard)
@@ -234,41 +244,27 @@ the backend ignores it.
 
 Render free tier shuts down idle services after ~15 min.
 Use [UptimeRobot](https://uptimerobot.com) (free) to ping
-`https://<service>.onrender.com/api/status` every 14 minutes.
+`https://<service>.onrender.com/api/health` every 14 minutes (the only public route).
 
 ---
 
 ## 6. Deploying the Frontend (Vercel)
 
-The frontend is a single static file — no build required.
+`vercel.json` builds `web/` and serves `web/dist`. It also forwards `/api/auth/*`
+to the Render backend, so the sign-in cookie is first-party (Safari blocks the
+third-party kind).
 
-### Steps
+1. [Create a Vercel account](https://vercel.com) and import the repository.
+2. **Project Settings → General**: Framework Preset *Other*, Root Directory blank.
+   Build, install and output settings come from `vercel.json`.
+3. **Project Settings → Environment Variables**: `VITE_API_URL` =
+   `https://aquacount-backend.onrender.com` (the build fails without it).
+4. If your Render service has another name, replace `aquacount-backend.onrender.com`
+   in `vercel.json` (the `/api/auth` rewrite and the Content-Security-Policy).
+5. Set the deployment branch to **`dev`** and **Deploy**.
+6. On Render, set `APP_URL` and `CORS_ORIGINS` to the Vercel address.
 
-1. [Create a Vercel account](https://vercel.com) and connect your GitHub repo.
-2. **New Project** → import the repository.
-3. Set these in **Project Settings → General**:
-
-   | Setting | Value |
-   |---|---|
-   | Framework Preset | Other |
-   | Root Directory | *(leave blank)* |
-   | Output Directory | `frontend` |
-   | Build Command | *(leave blank)* |
-   | Install Command | *(leave blank)* |
-
-4. Set deployment branch to **`dev`** in **Project Settings → Git**.
-5. Click **Deploy**.
-
-### Point the Frontend at Your Backend
-
-After both services are live, open the frontend with the `?backend=` parameter:
-
-```
-https://your-vercel-app.vercel.app/?backend=https://aquacount-backend.onrender.com
-```
-
-Or permanently hard-code your Render URL in `frontend/index.html`
-(search for `your-render-backend.onrender.com` and replace it).
+Google sign-in, Postgres and email setup: [docs/WEB_APP.md](docs/WEB_APP.md).
 
 ---
 
@@ -278,6 +274,15 @@ Or permanently hard-code your Render URL in `frontend/index.html`
 |---|---|---|
 | `MODEL_PATH` | Render | Path to ONNX file relative to repo root |
 | `PORT` | Render | Auto-set by Render |
+| `JWT_SECRET` | Render | Signs session tokens (Render generates it) |
+| `DATABASE_URL` | Render | Postgres for accounts and history (Render's disk is wiped on restart) |
+| `GOOGLE_CLIENT_ID` | Render | Enables "Continue with Google" |
+| `APP_URL`, `CORS_ORIGINS` | Render | The web app's public address |
+| `TRUST_PROXY` | Render | `1` behind Render's proxy |
+| `VITE_API_URL` | Vercel | Backend address the web app calls |
+
+Every backend variable is described in [`.env.example`](.env.example). On the
+hatchery laptop none are required; put any you want in a `.env` file at the repo root.
 
 ---
 
@@ -285,11 +290,16 @@ Or permanently hard-code your Render URL in `frontend/index.html`
 
 Base URL: `https://<render-service>.onrender.com`
 
+Every route below except `/api/health` needs `Authorization: Bearer <access token>`
+(from `/api/auth/login`, `/signup`, `/google` or `/refresh`). Accounts, history,
+insights and admin endpoints are listed in [docs/WEB_APP.md](docs/WEB_APP.md#api).
+
 ### REST Endpoints
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/status` | Health check; returns tracking state |
+| `GET` | `/api/health` | Public health check (no sign-in) |
+| `GET` | `/api/status` | Tracking state, plus who started the running job |
 | `GET` | `/api/counts` | Current total counts by class |
 | `GET` | `/video_feed` | MJPEG video stream |
 | `POST` | `/api/upload` | Single video or image upload (`multipart/form-data`, field `file`) |
@@ -298,23 +308,26 @@ Base URL: `https://<render-service>.onrender.com`
 | `POST` | `/api/start_camera` | Start webcam `{"camera_index": 0}` |
 | `POST` | `/api/stop` | Stop active processing |
 | `POST` | `/api/reset_counts` | Reset all counts to zero (closes the current run record and starts a new one) |
-| `GET` | `/api/runs` | Saved run records, newest first (each run's `summary.json`) |
-| `GET` | `/api/runs/<run_id>/<file>` | `report.html`, `events.csv`, `summary.json`, `crops/…`; add `?download=1` to download |
-| `GET` | `/` | The dashboard itself (works offline: libraries are in `frontend/vendor/`) |
+| `GET` | `/api/runs` | Your runs, newest first (admins: `?scope=all`); filters `status`, `kind`, `q` |
+| `GET` | `/api/runs/<run_id>` | One run: summary, files, spot-check crops, and a short-lived `media_token` |
+| `GET` | `/api/runs/<run_id>/<file>` | `report.html`, `events.csv`, `summary.json`, `crops/…` (bearer or `?t=<media_token>`); add `?download=1` to download |
+| `GET` | `/` | The web app (`web/dist`; works offline once built) |
 
 Only one job runs at a time. Starting a job while one is running returns
 **HTTP 409**: stop the running count first. A running count is never silently replaced.
 
 ### Socket.IO Events (Server → Client)
 
+Connect with `auth: {token: <access token>}`; connections without a valid token are refused.
+
 | Event | Payload |
 |---|---|
 | `update` | `{counts, active_tracks, fps, frame_number, source_type, is_live}` |
-| `processing_started` | `{source, type, job}` |
+| `processing_started` | `{source, type, job, started_by}` |
 | `processing_completed` | `{job}` |
 | `processing_error` | `{error, job}` |
 | `counts_reset` | `{}` |
-| `run_saved` | `{run_id, status, counts, corrected_total, warning, links}` |
+| `run_saved` | `{run_id, kind, status, counts, corrected_total, warning, links}` |
 | `batch_results` | `{results[], batch_totals, total_files}` |
 | `batch_csv_saved` | `{run_id, url}` |
 
@@ -337,9 +350,9 @@ Only one job runs at a time. Starting a job while one is running returns
 
 | Concern | Mitigation |
 |---|---|
-| Build cost | Zero — single static HTML, no npm, no bundler |
-| CDN latency | Vercel edge delivers the file from the nearest PoP |
-| JS dependency size | Socket.IO and Chart.js are vendored locally in `frontend/vendor/` (offline-ready, zero external CDN dependencies) |
+| Bundle size | About 100 KB of gzipped JS on first load; less-used pages load on demand |
+| CDN latency | Hashed assets are cached for a year at the edge; the app shell revalidates |
+| Offline | A service worker precaches the app shell, so it opens with no connection |
 
 ---
 
@@ -358,7 +371,7 @@ git checkout -b dev
 
 # Stage all production-ready files
 git add \
-  frontend/index.html \
+  web/ \
   src/ \
   scripts/ \
   models/best.onnx \

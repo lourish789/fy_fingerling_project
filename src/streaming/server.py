@@ -26,7 +26,7 @@ import cv2
 import numpy as np
 
 try:
-    from flask import Flask, Response, jsonify, request, send_from_directory
+    from flask import Flask, Response, g, jsonify, request
     from flask_cors import CORS
     from flask_socketio import SocketIO, emit
     from werkzeug.utils import secure_filename
@@ -36,8 +36,9 @@ except ImportError:
     print("Warning: Flask not available. Install with: pip install flask flask-socketio")
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-FRONTEND_DIR = REPO_ROOT / 'frontend'
 RUN_ID_PATTERN = re.compile(r'^[A-Za-z0-9_-]{1,120}$')
+# How a job started from the dashboard is labelled in run history.
+JOB_KIND_TO_RUN_KIND = {'upload': 'video', 'url': 'url', 'camera': 'camera', 'batch_upload': 'batch'}
 
 
 def is_safe_media_url(url: str) -> tuple[bool, str]:
@@ -118,7 +119,8 @@ class StreamingServer:
         process_callback: Optional[Callable] = None,
         stop_callback: Optional[Callable] = None,
         reset_callback: Optional[Callable] = None,
-        runs_dir: Optional[str] = None
+        runs_dir: Optional[str] = None,
+        database_url: Optional[str] = None
     ):
         """
         Initialize streaming server.
@@ -132,6 +134,8 @@ class StreamingServer:
             stop_callback: Callback to stop active processing loop.
             reset_callback: Callback to reset tracker counts/state.
             runs_dir: Folder holding per-run records (served for download).
+            database_url: Accounts/history database (default: DATABASE_URL env, else
+                SQLite in instance/).
         """
         if not FLASK_AVAILABLE:
             raise ImportError("Flask is required. Install with: pip install flask flask-socketio")
@@ -150,12 +154,26 @@ class StreamingServer:
         self._job_state_lock = threading.Lock()
         self._job_seq = 0
         self._worker_thread: Optional[threading.Thread] = None
+        # Who started the running job and what it is (shown to other operators).
+        self._job_info: Optional[Dict[str, Any]] = None
+        # Owner/kind of the job running on the current worker thread, so run records
+        # saved from deep inside the counting loop land in the right user's history.
+        self._job_ctx = threading.local()
+        # Set by the API layer: persists each saved run (summary, kind, owner_id).
+        self.on_run_saved: Optional[Callable[[Dict[str, Any], str, Optional[int]], None]] = None
+
+        # Settings in a .env file at the repo root (hatchery laptop) apply before anything reads them.
+        from api.config import load_dotenv
+        load_dotenv()
 
         # Flask app
         self.app = Flask(__name__)
-        cors_env = os.environ.get('CORS_ORIGINS', '*').strip()
+        cors_env = os.environ.get('CORS_ORIGINS', '*').strip() or '*'
         cors_origins = '*' if cors_env == '*' else [o.strip() for o in cors_env.split(',') if o.strip()]
-        CORS(self.app, resources={r"/*": {"origins": cors_origins}})
+        # Data calls use a bearer token, not cookies, so credentials are only needed
+        # when origins are listed explicitly (cross-site refresh cookie setups).
+        CORS(self.app, resources={r"/*": {"origins": cors_origins}},
+             expose_headers=['Retry-After'], supports_credentials=cors_origins != '*')
         self.app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY') or os.urandom(24).hex()
         self.app.config['UPLOAD_FOLDER'] = self.upload_folder
         self.app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500MB max
@@ -181,9 +199,13 @@ class StreamingServer:
         
         # Batch results storage
         self.batch_results: list = []
-        
+
         # Setup routes
         self._setup_routes()
+
+        # Accounts, sign-in, per-user history and the web app (src/api).
+        from api import init_api
+        self.api = init_api(self.app, self, database_url=database_url)
     
     def _allowed_file(self, filename: str) -> bool:
         """Check if file extension is allowed."""
@@ -191,54 +213,16 @@ class StreamingServer:
                filename.rsplit('.', 1)[1].lower() in self.ALLOWED_EXTENSIONS
     
     def _setup_routes(self) -> None:
-        """Setup Flask routes."""
-        
-        @self.app.route('/')
-        def index():
-            """Serve the dashboard (offline / same-origin use), or a status message."""
-            if (FRONTEND_DIR / 'index.html').exists():
-                return send_from_directory(FRONTEND_DIR, 'index.html')
-            return jsonify({'status': 'Fingerling Counter API is running', 'message': 'Frontend is hosted separately.'})
+        """Setup the counting-station routes.
 
-        @self.app.route('/config.js')
-        def frontend_config():
-            """Tells a dashboard served from this backend to call this same origin."""
-            return Response('window.AQUACOUNT_API = window.location.origin;\n',
-                            mimetype='application/javascript')
+        The web app, accounts, run history and downloads live in src/api, which also
+        puts every route here behind sign-in (see api._install_guard).
+        """
+        from api.http import rate_limit
 
-        @self.app.route('/vendor/<path:filename>')
-        def frontend_vendor(filename):
-            return send_from_directory(FRONTEND_DIR / 'vendor', filename, max_age=86400)
+        # Starting jobs is cheap to request and expensive to run.
+        limit_jobs = rate_limit('start-job', 30, 60, by='user')
 
-        @self.app.route('/api/runs')
-        def list_runs():
-            """Most recent runs first, with their summaries."""
-            runs = []
-            if self.runs_dir.is_dir():
-                for d in sorted(self.runs_dir.iterdir(), key=lambda x: x.name, reverse=True)[:100]:
-                    if not d.is_dir() or not RUN_ID_PATTERN.match(d.name):
-                        continue
-                    summary_path = d / 'summary.json'
-                    if summary_path.exists():
-                        try:
-                            runs.append(json.loads(summary_path.read_text(encoding='utf-8')))
-                            continue
-                        except (OSError, ValueError):
-                            pass
-                    runs.append({'run_id': d.name, 'status': 'running_or_incomplete'})
-            return jsonify({'runs': runs})
-
-        @self.app.route('/api/runs/<run_id>/<path:filename>')
-        def get_run_file(run_id, filename):
-            """Download a run's events.csv / summary.json / report.html / crops."""
-            if not RUN_ID_PATTERN.match(run_id):
-                return jsonify({'error': 'Invalid run id'}), 400
-            run_dir = self.runs_dir / run_id
-            if not run_dir.is_dir():
-                return jsonify({'error': 'Run not found'}), 404
-            return send_from_directory(run_dir, filename,
-                                       as_attachment=request.args.get('download') == '1')
-        
         @self.app.route('/video_feed')
         def video_feed():
             """MJPEG video stream."""
@@ -251,11 +235,10 @@ class StreamingServer:
         def api_status():
             """Get current status."""
             with self.data_lock:
-                if self.current_data:
-                    data = self.current_data.to_dict()
-                    data['is_processing'] = self.is_processing
-                    return jsonify(data)
-                return jsonify({'status': 'no data', 'is_processing': self.is_processing})
+                data = self.current_data.to_dict() if self.current_data else {'status': 'no data'}
+            data['is_processing'] = self.is_processing
+            data['job'] = self._public_job_info()
+            return jsonify(data)
         
         @self.app.route('/api/counts')
         def api_counts():
@@ -269,6 +252,7 @@ class StreamingServer:
                 return jsonify({'counts': {}, 'distribution': {}})
         
         @self.app.route('/api/upload', methods=['POST'])
+        @limit_jobs
         def upload_file():
             """Handle file upload."""
             if 'file' not in request.files:
@@ -285,7 +269,7 @@ class StreamingServer:
                     return jsonify({'error': 'Server is not accepting jobs'}), 503
                 filename, filepath, upload_dir = self._save_upload(file)
                 if not self._start_job('upload', filename, self.process_callback, (filepath,),
-                                       cleanup=[upload_dir]):
+                                       cleanup=[upload_dir], owner=self._actor()):
                     shutil.rmtree(upload_dir, ignore_errors=True)
                     return self._busy_response()
 
@@ -298,6 +282,7 @@ class StreamingServer:
             return jsonify({'error': 'File type not allowed'}), 400
         
         @self.app.route('/api/upload_batch', methods=['POST'])
+        @limit_jobs
         def upload_batch():
             """Handle multiple image uploads for batch processing."""
             if 'files' not in request.files:
@@ -324,7 +309,7 @@ class StreamingServer:
                     # Same queue as video jobs, so a batch never overlaps a count.
                     runner = lambda f: self.counter.run_exclusive(self._process_batch_files, f)
                 if not self._start_job('batch_upload', f'{len(uploaded_files)} image(s)', runner,
-                                       (uploaded_files,), cleanup=upload_dirs):
+                                       (uploaded_files,), cleanup=upload_dirs, owner=self._actor()):
                     for d in upload_dirs:
                         shutil.rmtree(d, ignore_errors=True)
                     return self._busy_response()
@@ -339,9 +324,10 @@ class StreamingServer:
             return jsonify({'error': 'No valid files provided'}), 400
         
         @self.app.route('/api/process_url', methods=['POST'])
+        @limit_jobs
         def process_url():
             """Process video/image from URL."""
-            data = request.get_json()
+            data = request.get_json(silent=True)
             if not data or 'url' not in data:
                 return jsonify({'error': 'No URL provided'}), 400
             
@@ -351,7 +337,7 @@ class StreamingServer:
                 return jsonify({'error': url_err}), 400
             if not self.process_callback:
                 return jsonify({'error': 'Server is not accepting jobs'}), 503
-            if not self._start_job('url', url, self.process_callback, (url,)):
+            if not self._start_job('url', url, self.process_callback, (url,), owner=self._actor()):
                 return self._busy_response()
 
             return jsonify({
@@ -361,9 +347,10 @@ class StreamingServer:
             })
         
         @self.app.route('/api/start_camera', methods=['POST'])
+        @limit_jobs
         def start_camera():
             """Start processing from camera."""
-            data = request.get_json() or {}
+            data = request.get_json(silent=True) or {}
             try:
                 camera_index = int(data.get('camera_index', 0))
             except (TypeError, ValueError):
@@ -371,7 +358,7 @@ class StreamingServer:
             if not self.process_callback:
                 return jsonify({'error': 'Server is not accepting jobs'}), 503
             if not self._start_job('camera', f'camera {camera_index}', self.process_callback,
-                                   (camera_index,)):
+                                   (camera_index,), owner=self._actor()):
                 return self._busy_response()
 
             return jsonify({
@@ -411,17 +398,20 @@ class StreamingServer:
             return jsonify(self.image_results)
         
         @self.socketio.on('connect')
-        def handle_connect():
-            """Handle client connection."""
-            print("Client connected")
+        def handle_connect(auth=None):
+            """Only signed-in dashboards receive frames and counts."""
+            from api import authenticate_token
+            token = (auth or {}).get('token') if isinstance(auth, dict) else None
+            user, _claims, _code = authenticate_token(self.api, str(token or ''), 'access')
+            if user is None:
+                raise ConnectionRefusedError('unauthorized')
             with self.data_lock:
                 if self.current_data:
                     emit('update', self.current_data.to_dict())
         
         @self.socketio.on('disconnect')
-        def handle_disconnect():
-            """Handle client disconnection."""
-            print("Client disconnected")
+        def handle_disconnect(*_args):
+            pass
     
     def _busy_response(self):
         return jsonify({
@@ -441,12 +431,28 @@ class StreamingServer:
         file.save(filepath)
         return filename, filepath, upload_dir
 
+    @staticmethod
+    def _actor() -> Optional[Dict[str, Any]]:
+        """The signed-in user making this request, as {'id', 'name'}."""
+        user = getattr(g, 'user', None)
+        if user is None:
+            return None
+        return {'id': user.id, 'name': user.name or user.email}
+
+    def _public_job_info(self) -> Optional[Dict[str, Any]]:
+        info = self._job_info if self.is_processing else None
+        if not info:
+            return None
+        return {'kind': info['kind'], 'label': info['label'], 'started_at': info['started_at'],
+                'started_by': info.get('owner_name')}
+
     def _start_job(self, kind: str, label: str, target: Callable, args: tuple,
-                   cleanup: Optional[list] = None) -> bool:
+                   cleanup: Optional[list] = None, owner: Optional[Dict[str, Any]] = None) -> bool:
         """
         Run `target(*args)` in a background thread as the single active job.
 
-        Returns False, and starts nothing, if a job is already running.
+        Returns False, and starts nothing, if a job is already running. `owner`
+        ({'id', 'name'}) is who started it: their history receives its run records.
         """
         with self._job_state_lock:
             if self.is_processing:
@@ -454,9 +460,17 @@ class StreamingServer:
             self.is_processing = True
             self._job_seq += 1
             job = self._job_seq
+            self._job_info = {
+                'kind': kind, 'label': label, 'started_at': datetime.now().isoformat(timespec='seconds'),
+                'owner_id': (owner or {}).get('id'), 'owner_name': (owner or {}).get('name'),
+            }
 
         def runner():
-            self.socketio.emit('processing_started', {'source': label, 'type': kind, 'job': job})
+            self._job_ctx.owner_id = (owner or {}).get('id')
+            self._job_ctx.kind = kind
+            self.socketio.emit('processing_started', {
+                'source': label, 'type': kind, 'job': job,
+                'started_by': (owner or {}).get('name')})
             try:
                 target(*args)
             except Exception as e:
@@ -479,12 +493,24 @@ class StreamingServer:
         thread.start()
         return True
 
+    def _persist_run(self, summary: Dict[str, Any], kind: str) -> None:
+        """Hand a finished run to the API layer, attributed to whoever started this job."""
+        if not self.on_run_saved:
+            return
+        try:
+            self.on_run_saved(summary, kind, getattr(self._job_ctx, 'owner_id', None))
+        except Exception as e:  # history is a convenience; never break the count over it
+            print(f"Warning: could not record run {summary.get('run_id')} in history ({e}).")
+
     def notify_run_saved(self, summary: Dict[str, Any]) -> None:
-        """Tell dashboards a run record is ready, with download links."""
+        """Record the run in its owner's history and tell dashboards it is ready."""
         run_id = summary.get('run_id', '')
+        kind = summary.get('kind') or JOB_KIND_TO_RUN_KIND.get(getattr(self._job_ctx, 'kind', None), 'video')
+        self._persist_run(summary, kind)
         base = f"/api/runs/{run_id}/"
         payload = {
             'run_id': run_id,
+            'kind': kind,
             'status': summary.get('status'),
             'counts': summary.get('counts', {}),
             'corrected_total': summary.get('corrected_total'),
@@ -501,6 +527,44 @@ class StreamingServer:
         except Exception:
             pass
 
+    def _new_run_dir(self, label: str) -> tuple:
+        stem = re.sub(r'[^A-Za-z0-9_-]+', '-', label)[:40].strip('-') or 'run'
+        run_id = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{stem}-{uuid.uuid4().hex[:4]}"
+        out_dir = self.runs_dir / run_id
+        out_dir.mkdir(parents=True, exist_ok=True)
+        return run_id, out_dir
+
+    def record_image_run(self, source: str, counts: Dict[str, Any], detections: int,
+                         annotated_image: Optional[np.ndarray], started_at: datetime) -> None:
+        """Keep a single-image count in history: summary.json plus the annotated image."""
+        try:
+            run_id, out_dir = self._new_run_dir(f"image-{Path(str(source)).stem}")
+            files = {'summary_json': 'summary.json'}
+            if annotated_image is not None:
+                cv2.imwrite(str(out_dir / 'annotated.jpg'), annotated_image, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                files['annotated'] = 'annotated.jpg'
+            summary = {
+                'run_id': run_id, 'kind': 'image', 'source': Path(str(source)).name or str(source),
+                'status': 'completed', 'started_at': started_at.isoformat(timespec='seconds'),
+                'ended_at': datetime.now().isoformat(timespec='seconds'),
+                'processing_seconds': round((datetime.now() - started_at).total_seconds(), 2),
+                'frames_processed': 1,
+                'counts': {k: int(counts.get(k, 0) or 0)
+                           for k in ('total', 'fingerling', 'post_fingerling', 'juvenile', 'unknown')},
+                'detections': int(detections), 'files': files,
+            }
+            (out_dir / 'summary.json').write_text(json.dumps(summary, indent=2), encoding='utf-8')
+        except Exception as e:
+            print(f"Warning: could not save image run record ({e}).")
+            return
+        self._persist_run(summary, 'image')
+        try:
+            self.socketio.emit('run_saved', {'run_id': run_id, 'kind': 'image', 'status': 'completed',
+                                             'counts': summary['counts'], 'corrected_total': None,
+                                             'warning': '', 'links': {}})
+        except Exception:
+            pass
+
     def _process_batch_files(self, files: list) -> None:
         """Process multiple image files in batch."""
         self.batch_results = []
@@ -512,6 +576,19 @@ class StreamingServer:
             'unknown': 0
         }
         
+        # The run folder is created up front so annotated images are written as they
+        # are produced, instead of being held in memory for the whole batch.
+        started_at = datetime.now()
+        run_id, out_dir, images_dir = None, None, None
+        try:
+            run_id = f"{started_at.strftime('%Y%m%d_%H%M%S')}_batch-{uuid.uuid4().hex[:4]}"
+            out_dir = self.runs_dir / run_id
+            images_dir = out_dir / 'images'
+            images_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            print(f"Warning: could not create batch record folder ({e}).")
+            out_dir = images_dir = None
+
         # Process each file
         for idx, file_info in enumerate(files):
             try:
@@ -553,13 +630,23 @@ class StreamingServer:
                 for key in batch_totals:
                     batch_totals[key] += counts_by_class.get(key, 0)
                 
-                # Convert annotated image to base64 if available
+                # Convert annotated image to base64 if available, and keep a copy on disk
                 image_base64 = None
+                image_rel = None
                 try:
                     annotated_image = result_data.get('annotated_image')
                     if annotated_image is not None:
                         _, buffer = cv2.imencode('.jpg', annotated_image)
                         image_base64 = base64.b64encode(buffer).decode('utf-8')
+                        if images_dir is not None:
+                            stored = annotated_image
+                            h, w = stored.shape[:2]
+                            if w > 1280:
+                                stored = cv2.resize(stored, (1280, int(h * 1280 / w)),
+                                                    interpolation=cv2.INTER_AREA)
+                            stem = secure_filename(Path(file_info['filename']).stem)[:40] or 'image'
+                            image_rel = f"images/{idx + 1:03d}_{stem}.jpg"
+                            cv2.imwrite(str(out_dir / image_rel), stored, [cv2.IMWRITE_JPEG_QUALITY, 82])
                 except Exception as e:
                     print(f"Failed to encode image: {e}")
                 
@@ -582,7 +669,8 @@ class StreamingServer:
                     'counts': counts_by_class,
                     'detections': detection_count,
                     'label_summary': ', '.join(label_summary_parts) if label_summary_parts else 'No detections',
-                    'annotated_image': image_base64
+                    'annotated_image': image_base64,
+                    'image': image_rel
                 })
             except Exception as e:
                 self.batch_results.append({
@@ -599,10 +687,9 @@ class StreamingServer:
         })
 
         # Save CSV summary for this batch as a downloadable run record
+        if out_dir is None:
+            return
         try:
-            run_id = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_batch-{uuid.uuid4().hex[:4]}"
-            out_dir = self.runs_dir / run_id
-            out_dir.mkdir(parents=True, exist_ok=True)
             csv_path = out_dir / 'batch_summary.csv'
             import csv as _csv
             with open(csv_path, 'w', newline='', encoding='utf-8') as _f:
@@ -631,6 +718,30 @@ class StreamingServer:
                 pass
         except Exception as e:
             print(f"Failed to write batch CSV: {e}")
+            return
+
+        # summary.json makes the batch a first-class run in history (no base64 inside).
+        ended_at = datetime.now()
+        summary = {
+            'run_id': run_id, 'kind': 'batch', 'source': f'{len(files)} image(s)',
+            'status': 'completed', 'started_at': started_at.isoformat(timespec='seconds'),
+            'ended_at': ended_at.isoformat(timespec='seconds'),
+            'processing_seconds': round((ended_at - started_at).total_seconds(), 2),
+            'frames_processed': len(files), 'total_files': len(files), 'counts': batch_totals,
+            'results': [{k: v for k, v in r.items() if k != 'annotated_image'} for r in self.batch_results],
+            'files': {'batch_summary_csv': 'batch_summary.csv', 'summary_json': 'summary.json'},
+        }
+        try:
+            (out_dir / 'summary.json').write_text(json.dumps(summary, indent=2), encoding='utf-8')
+        except OSError as e:
+            print(f"Warning: could not write batch summary.json ({e}).")
+        self._persist_run(summary, 'batch')
+        try:
+            self.socketio.emit('run_saved', {'run_id': run_id, 'kind': 'batch', 'status': 'completed',
+                                             'counts': batch_totals, 'corrected_total': None,
+                                             'warning': '', 'links': {}})
+        except Exception:
+            pass
     
     def _generate_frames(self) -> Generator[bytes, None, None]:
         """Generate MJPEG frames."""

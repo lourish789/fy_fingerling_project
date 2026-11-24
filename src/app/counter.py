@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any, Union, List
 import yaml
 import threading
+from datetime import datetime
 
 import cv2
 import numpy as np
@@ -391,6 +392,7 @@ class FingerlingCounter:
     def _process_source_locked(self, source: Union[str, int], job_id: int) -> None:
         source_str = str(source)
         if isinstance(source, str) and (ImageProcessor.is_image_file(source_str) or ImageProcessor.is_image_url(source_str)):
+            started_at = datetime.now()
             image_result = self.process_image_file(source_str, no_annotations=False)
             if 'error' in image_result:
                 raise RuntimeError(image_result['error'])
@@ -428,6 +430,10 @@ class FingerlingCounter:
                         if int(image_result['counts'].get(class_key, 0) or 0) > 0
                     ) or 'No detections'
                 })
+                if self.save_runs:
+                    self.streaming_server.record_image_run(
+                        source_str, image_result['counts'], len(image_result['detections']),
+                        image_result['annotated_image'], started_at)
             return
         
         # Update source and process

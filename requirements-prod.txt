@@ -27,6 +27,13 @@ python-socketio>=5.9.0
 # No eventlet/gevent needed; gthread is built into gunicorn.
 gunicorn>=22.0.0
 
+# ── Accounts & sign-in (src/api) ─────────────────────────────────────────────
+# PyJWT signs session tokens; [crypto] verifies Google sign-in tokens (RS256).
+PyJWT[crypto]>=2.8,<3
+SQLAlchemy>=2.0,<3
+# Postgres driver for DATABASE_URL on hosted deployments (SQLite needs nothing).
+psycopg2-binary>=2.9
+
 # ── Utilities ─────────────────────────────────────────────────────────────────
 pyyaml>=6.0.0
 requests>=2.31.0

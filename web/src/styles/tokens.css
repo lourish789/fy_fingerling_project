@@ -1,0 +1,218 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   AquaCount design tokens
+   Components use roles (--surface-1, --text-2, --accent), never raw hex, so
+   light and dark are swapped in one place. Dark is the default look (it is
+   easier on the eyes beside a bright channel and saves phone battery).
+
+   The class palette was validated for colour-vision deficiency on both
+   surfaces (dataviz validate_palette.js, all pairs): fingerling green, post-
+   fingerling blue and juvenile orange match the boxes drawn on the video.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* Type */
+  --font-sans: 'Inter Variable', Inter, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  --text-xs: 0.75rem;     /* 12 */
+  --text-sm: 0.8125rem;   /* 13 */
+  --text-md: 0.9375rem;   /* 15 body */
+  --text-lg: 1.0625rem;   /* 17 */
+  --text-xl: 1.25rem;     /* 20 */
+  --text-2xl: 1.5rem;     /* 24 */
+  --text-3xl: 2rem;       /* 32 */
+  --text-hero: clamp(2.75rem, 9vw, 3.5rem); /* 44 – 56: one per view */
+  --leading-tight: 1.2;
+  --leading-normal: 1.5;
+  --weight-regular: 420;
+  --weight-medium: 520;
+  --weight-semibold: 620;
+  --weight-bold: 700;
+  --tracking-tight: -0.015em;
+  --tracking-caps: 0.06em;
+
+  /* Spacing: 4px base */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --gutter: 16px;
+
+  /* Shape */
+  --radius-xs: 6px;
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-pill: 999px;
+
+  /* Layout */
+  --topbar-h: 56px;
+  --bottomnav-h: 64px;
+  --sidebar-w: 248px;
+  --sidebar-rail-w: 76px;
+  --content-max: 1180px;
+  --tap: 44px; /* minimum touch target */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+
+  /* Motion */
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --dur-fast: 120ms;
+  --dur-med: 220ms;
+  --dur-slow: 360ms;
+
+  /* Layers */
+  --z-nav: 30;
+  --z-sticky: 40;
+  --z-drawer: 60;
+  --z-toast: 80;
+}
+
+/* ── Dark (default) ─────────────────────────────────────────────────────── */
+:root,
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --page: #0a101d;
+  --surface-1: #111a2b;          /* cards, chart surface */
+  --surface-2: #16223a;          /* raised: inputs, hover, sheets */
+  --surface-3: #1d2b47;          /* pressed / selected */
+  --surface-inverse: #e8eef7;
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.16);
+  --text-1: #e8eef7;
+  --text-2: #a7b4c8;
+  --text-3: #8292a8;             /* muted: 5.5:1 on surface-1 */
+  --text-on-accent: #06222b;
+
+  --accent: #22b4d6;             /* UI: links, focus, primary buttons */
+  --accent-strong: #4cc6e2;
+  --accent-soft: rgba(34, 180, 214, 0.14);
+  --chart-accent: #1a9cc0;       /* single-series marks (inside the dark lightness band) */
+
+  --success: #4ade80;
+  --success-soft: rgba(74, 222, 128, 0.12);
+  --warning: #fbbf24;
+  --warning-soft: rgba(251, 191, 36, 0.12);
+  --danger: #ff6b6b;
+  --danger-soft: rgba(255, 107, 107, 0.13);
+  --danger-fill: #e5484d;
+  --text-on-danger: #ffffff;
+
+  --class-fingerling: #199e70;
+  --class-post: #3987e5;
+  --class-juvenile: #d95926;
+  --class-unknown: #6b778a;
+
+  --grid: #22304a;               /* hairline gridlines */
+  --axis: #34435f;
+  --skeleton: rgba(255, 255, 255, 0.06);
+  --skeleton-shine: rgba(255, 255, 255, 0.1);
+  --overlay: rgba(3, 7, 15, 0.62);
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-2: 0 8px 28px rgba(0, 0, 0, 0.45);
+  --focus-ring: 0 0 0 3px rgba(34, 180, 214, 0.45);
+  --video-bg: #05080f;
+}
+
+/* ── Light ──────────────────────────────────────────────────────────────── */
+:root[data-theme='light'] {
+  color-scheme: light;
+  --page: #f4f7fb;
+  --surface-1: #ffffff;
+  --surface-2: #f1f4f9;
+  --surface-3: #e5ebf4;
+  --surface-inverse: #0b1220;
+  --border: rgba(11, 18, 32, 0.09);
+  --border-strong: rgba(11, 18, 32, 0.18);
+  --text-1: #0b1220;
+  --text-2: #475569;
+  --text-3: #5b6b82;
+  --text-on-accent: #ffffff;
+
+  --accent: #0a7594;
+  --accent-strong: #08617b;
+  --accent-soft: rgba(10, 117, 148, 0.1);
+  --chart-accent: #0b84a5;
+
+  --success: #15803d;
+  --success-soft: rgba(21, 128, 61, 0.1);
+  --warning: #b45309;
+  --warning-soft: rgba(217, 119, 6, 0.12);
+  --danger: #b42318;
+  --danger-soft: rgba(180, 35, 24, 0.08);
+  --danger-fill: #c9302c;
+  --text-on-danger: #ffffff;
+
+  --class-fingerling: #1baf7a;
+  --class-post: #2a78d6;
+  --class-juvenile: #eb6834;
+  --class-unknown: #9aa3b2;
+
+  --grid: #e6eaf0;
+  --axis: #c3cbd6;
+  --skeleton: rgba(11, 18, 32, 0.06);
+  --skeleton-shine: rgba(11, 18, 32, 0.1);
+  --overlay: rgba(11, 18, 32, 0.4);
+  --shadow-1: 0 1px 2px rgba(11, 18, 32, 0.06);
+  --shadow-2: 0 10px 30px rgba(11, 18, 32, 0.12);
+  --focus-ring: 0 0 0 3px rgba(10, 117, 148, 0.35);
+  --video-bg: #0b1220;
+}
+
+/* System preference applies only when the user has not picked a theme. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']) {
+    color-scheme: light;
+    --page: #f4f7fb;
+    --surface-1: #ffffff;
+    --surface-2: #f1f4f9;
+    --surface-3: #e5ebf4;
+    --surface-inverse: #0b1220;
+    --border: rgba(11, 18, 32, 0.09);
+    --border-strong: rgba(11, 18, 32, 0.18);
+    --text-1: #0b1220;
+    --text-2: #475569;
+    --text-3: #5b6b82;
+    --text-on-accent: #ffffff;
+    --accent: #0a7594;
+    --accent-strong: #08617b;
+    --accent-soft: rgba(10, 117, 148, 0.1);
+    --chart-accent: #0b84a5;
+    --success: #15803d;
+    --success-soft: rgba(21, 128, 61, 0.1);
+    --warning: #b45309;
+    --warning-soft: rgba(217, 119, 6, 0.12);
+    --danger: #b42318;
+    --danger-soft: rgba(180, 35, 24, 0.08);
+    --danger-fill: #c9302c;
+    --text-on-danger: #ffffff;
+    --class-fingerling: #1baf7a;
+    --class-post: #2a78d6;
+    --class-juvenile: #eb6834;
+    --class-unknown: #9aa3b2;
+    --grid: #e6eaf0;
+    --axis: #c3cbd6;
+    --skeleton: rgba(11, 18, 32, 0.06);
+    --skeleton-shine: rgba(11, 18, 32, 0.1);
+    --overlay: rgba(11, 18, 32, 0.4);
+    --shadow-1: 0 1px 2px rgba(11, 18, 32, 0.06);
+    --shadow-2: 0 10px 30px rgba(11, 18, 32, 0.12);
+    --focus-ring: 0 0 0 3px rgba(10, 117, 148, 0.35);
+    --video-bg: #0b1220;
+  }
+}
+
+@media (min-width: 768px) {
+  :root { --gutter: 24px; --topbar-h: 64px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --dur-fast: 0ms; --dur-med: 0ms; --dur-slow: 0ms; }
+}

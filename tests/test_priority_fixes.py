@@ -11,6 +11,7 @@ Run from the repository root:
     python -m unittest discover -s tests -v
 """
 import csv
+import os
 import shutil
 import sys
 import tempfile
@@ -23,6 +24,8 @@ import cv2
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
+# A fixed signing key, so tests never write instance/secret_key into the repo.
+os.environ.setdefault('JWT_SECRET', 'aquacount-tests-' + 'x' * 40)
 sys.path.insert(0, str(ROOT / "src"))
 
 from models.onnx_detector import OnnxFingerlingDetector, _FallbackDetector  # noqa: E402
@@ -125,9 +128,11 @@ class ServerFixesTests(unittest.TestCase):
 
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="aquacount_srv_"))
-        self.server = StreamingServer(runs_dir=str(self.tmp / "runs"))
+        self.server = StreamingServer(runs_dir=str(self.tmp / "runs"),
+                                      database_url=f"sqlite:///{(self.tmp / 'test.db').as_posix()}")
 
     def tearDown(self):
+        self.server.api.db.dispose()
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def test_batch_csv_writes_cleanly_when_detections_is_a_list(self):
@@ -172,7 +177,11 @@ class ServerFixesTests(unittest.TestCase):
         self.assertTrue(started.wait(timeout=2.0))
 
         client = self.server.app.test_client()
-        resp = client.post("/api/stop")
+        # Station controls need a signed-in user.
+        self.assertEqual(client.post("/api/stop").status_code, 401)
+        token = client.post("/api/auth/signup", json={
+            "name": "Operator", "email": "op@example.com", "password": "fingerlings-2026"}).get_json()["access_token"]
+        resp = client.post("/api/stop", headers={"Authorization": f"Bearer {token}"})
         self.assertEqual(resp.status_code, 200)
         # Worker is still finishing teardown -> is_processing must still be True
         self.assertTrue(self.server.is_processing)

@@ -33,14 +33,19 @@
 - Module: `src/video/visualization.py`
 
 6. Serving Layer (Backend)
-- REST endpoints for upload, batch upload, URL processing (with SSRF guard), camera start/stop, reset, and `/api/runs` history/downloads.
-- Socket.IO stream for live frames, counters, status, and run notifications; MJPEG `/video_feed` endpoint for local/same-origin use.
+- REST endpoints for upload, batch upload, URL processing (with SSRF guard), camera start/stop and reset. Each job records who started it.
+- Socket.IO stream for live frames, counters, status, and run notifications (signed-in clients only); MJPEG `/video_feed` endpoint for local/same-origin use.
 - Modules: `src/streaming/server.py`, `src/streaming/wsgi.py`
 
+6b. Accounts & History Layer (Backend)
+- Email/password and Google sign-in, rotating refresh-token sessions, password reset, profile and preferences, per-user run history (`/api/runs`), insights, admin (users, station config). Every `/api` route is private unless marked public.
+- SQLite (`instance/`) offline; Postgres via `DATABASE_URL` when hosted. Run files stay in `output/runs/`.
+- Modules: `src/api/` (details in `docs/WEB_APP.md`)
+
 7. Web UI Layer (Frontend)
-- Single-page offline-ready dashboard served directly by the backend (or via Vercel for cloud demo), using locally vendored Socket.IO and Chart.js (`frontend/vendor/`).
-- Live video feed, per-class counts, distribution chart, batch gallery, recent runs history, and source controls.
-- Files: `frontend/index.html`, `frontend/config.js`
+- Mobile-first installable PWA (React + TypeScript + Vite): bottom tab bar on phones, sidebar on tablets/desktops, light/dark design system, offline app shell.
+- Screens: sign-in/sign-up/password reset, onboarding, home, live count (feed, class counters, camera/upload/batch/stream sources), history, run detail (report, fish log, spot-check crops), insights, profile & security, settings, admin.
+- Built into `web/dist`, served by the backend (hatchery, offline) or by Vercel (cloud). Source: `web/src/`.
 
 7. Training Layer
 - Dataset preparation from COCO zip to YOLO labels.

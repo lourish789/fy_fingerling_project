@@ -11,6 +11,7 @@ services:
     # gthread worker: built-in to gunicorn, no extras needed.
     # Flask-SocketIO uses async_mode='threading' which pairs with gthread.
     # --workers 1 --threads 4  stays within Render free-tier 512 MB RAM.
+    # (One worker also keeps the in-memory sign-in rate limiter consistent.)
     startCommand: >
       gunicorn
       --worker-class gthread
@@ -22,7 +23,8 @@ services:
       --log-level info
       "src.streaming.wsgi:app"
 
-    healthCheckPath: /api/status
+    # Public, no sign-in needed (every other /api route requires an account).
+    healthCheckPath: /api/health
 
     envVars:
       - key: MODEL_PATH
@@ -31,7 +33,46 @@ services:
       # If CONFIDENCE_THRESHOLD is still set in the Render dashboard, delete it.
       - key: PORT
         value: "10000"
-      # Set RENDER_BACKEND_URL to your Render public URL so the frontend
-      # knows where to connect (used as ?backend= query param):
-      - key: RENDER_BACKEND_URL
-        value: https://aquacount-backend.onrender.com
+
+      # ── Accounts & sign-in (see docs/WEB_APP.md) ──────────────────────────
+      # Signs access tokens. Generated once by Render; keep it secret.
+      - key: JWT_SECRET
+        generateValue: true
+      # Render's free disk is wiped on every restart, so accounts and history
+      # need an external Postgres (Neon / Supabase / Render Postgres):
+      #   postgresql://user:password@host:5432/dbname
+      # Without it, accounts are lost each time the service sleeps.
+      - key: DATABASE_URL
+        sync: false
+      # Google sign-in: OAuth client ID (Web application) from Google Cloud.
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      # Public address of the web app (e.g. https://your-app.vercel.app), used in
+      # password-reset emails. Set it in the dashboard.
+      - key: APP_URL
+        sync: false
+      # Only the web app may call the API from a browser: set to the same
+      # address as APP_URL. Unset means any origin (fine for a first test only).
+      - key: CORS_ORIGINS
+        sync: false
+      # Render sits behind a proxy: trust X-Forwarded-For / -Proto for client
+      # IPs (rate limits) and Secure cookies.
+      - key: TRUST_PROXY
+        value: "1"
+      # "0" turns off self sign-up: only accounts that already exist can sign in.
+      - key: ALLOW_SIGNUP
+        value: "1"
+      # Comma-separated emails that are always administrators.
+      - key: ADMIN_EMAILS
+        sync: false
+      # Password-reset email (optional; without it the link is printed to the logs).
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM
+        sync: false
